@@ -87,4 +87,13 @@ The system supports a powerful **API Render Type**. You can point a component at
 
 ---
 
+## 📸 Acknowledgements
+
+The 360° panorama images used in this project are sourced from the **Zillow Indoor Dataset (ZIND)**.
+
+- **Dataset**: [Zillow Indoor Dataset (ZIND)](https://github.com/zillow/zind)
+- **License**: The data is used for research/prototyping purposes as per the dataset's licensing terms.
+
+---
+
 _Phase 1 Prototype - Spatial Tour System (Built for Gemini 3.5 & V-OS Simulation)_
