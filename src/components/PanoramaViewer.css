@@ -1,0 +1,202 @@
+/**
+ * Panorama Viewer HUD styles
+ * SHIFT+CLICK edit help floating glass panel + navigation marker cards
+ */
+
+/* ── Navigation marker glass card ───────────────────────────────────── */
+
+.nav-marker-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 217, 255, 0.35);
+  background: radial-gradient(
+    circle at 20% 0%,
+    rgba(0, 217, 255, 0.22),
+    rgba(6, 10, 22, 0.92)
+  );
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  color: #f0faff;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+  user-select: none;
+}
+
+.nav-marker-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle at 30% 0%,
+    rgba(255, 255, 255, 0.35),
+    rgba(0, 0, 0, 0.35)
+  );
+  flex-shrink: 0;
+  transition: color 0.2s ease;
+}
+
+.nav-marker-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1;
+}
+
+.nav-marker-label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(200, 230, 255, 0.65);
+}
+
+.nav-marker-room {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8f6ff;
+  text-transform: capitalize;
+}
+
+.nav-marker-arrow {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+  transition: color 0.2s ease;
+}
+
+.edit-help-shell {
+  position: fixed;
+  top: 80px;
+  left: 24px;
+  max-width: 320px;
+  z-index: 120;
+  pointer-events: none;
+}
+
+.edit-help-panel {
+  pointer-events: auto;
+  padding: 12px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: radial-gradient(
+    circle at top left,
+    rgba(0, 217, 255, 0.2),
+    rgba(6, 10, 20, 0.96)
+  );
+  color: #f7fbff;
+  box-shadow:
+    0 18px 45px rgba(0, 0, 0, 0.7),
+    0 0 1px rgba(255, 255, 255, 0.16) inset;
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    sans-serif;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transform-origin: top left;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.edit-help-panel.ready {
+  background: radial-gradient(
+    circle at top left,
+    rgba(0, 255, 136, 0.32),
+    rgba(6, 18, 12, 0.98)
+  );
+  border-color: rgba(0, 255, 136, 0.65);
+  box-shadow:
+    0 20px 60px rgba(0, 255, 136, 0.35),
+    0 0 1px rgba(0, 255, 136, 0.65) inset;
+  transform: scale(1.03) translateY(-1px);
+}
+
+.edit-help-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.edit-help-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+    circle at 30% 0%,
+    rgba(255, 255, 255, 0.35),
+    rgba(0, 0, 0, 0.35)
+  );
+  box-shadow: 0 0 16px rgba(0, 217, 255, 0.6);
+}
+
+.edit-help-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.edit-help-label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(220, 232, 255, 0.7);
+}
+
+.edit-help-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.edit-help-body {
+  font-size: 12px;
+  color: rgba(220, 232, 255, 0.95);
+}
+
+.edit-help-coords {
+  margin-top: 4px;
+  font-family:
+    "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+
+@media (max-width: 768px) {
+  .edit-help-shell {
+    top: auto;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 90vw;
+  }
+
+  .edit-help-panel {
+    font-size: 11.5px;
+  }
+}

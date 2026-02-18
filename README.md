@@ -1,73 +1,90 @@
-# React + TypeScript + Vite
+# 🥽 Mixed Reality House — Virtual Tour POC
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A high-fidelity 360° virtual tour prototype built with **React**, **Three.js**, and **React Three Fiber**. This project showcases a modern Apple Vision Pro-inspired glassmorphism UI for spatial computing annotations in a browser-based environment.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## ✨ Key Features
 
-## React Compiler
+- **🌐 360° Panorama Navigation**: Smooth transitions between interconnected 360° photo environments.
+- **🧊 Spatial Glassmorphism UI**: High-blur, high-saturation overlays powered by `framer-motion` and `lucide-react`.
+- **📍 Dynamic Annotations (XR Components)**:
+  - **InfoBox**: Rich text spatial hints.
+  - **Status**: Live-pulsing system/logic indicators.
+  - **Steps**: Ordered contextual instructions.
+  - **Alerts**: Critical system warnings with visual pulsing.
+  - **Image Gallery**: Hoverable/expandable image overlays.
+  - **API Driven**: Real-time components that fetch JSON data from URLs on room entry/intervals.
+- **🏗️ Visual Editor**:
+  - `SHIFT + CLICK` to place markers anywhere in 3D space.
+  - Real-time manipulation of marker properties, scaling, and metadata.
+  - Navigation Marker system to link rooms together.
+- **💾 Persistence**: All customizations and placements are persisted via `localStorage`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## 🛠️ Tech Stack
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Framework**: [React 19](https://react.dev/)
+- **Runtime**: [Vite](https://vitejs.dev/)
+- **3D Engine**: [@react-three/fiber](https://r3f.docs.pmnd.rs/) & [Three.js](https://threejs.org/)
+- **Components**: [@react-three/drei](https://github.com/pmndrs/drei) (Html, OrbitControls, Environment)
+- **Animations**: [Framer Motion](https://www.framer.com/motion/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+- **State**: [Zustand](https://zustand-demo.pmnd.rs/) & React State
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+---
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## 🚀 Quick Start
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### 1. Installation
+
+```bash
+git clone <repo-url>
+cd mixedRealityHouse
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 2. Development
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev
 ```
+
+---
+
+## 🖱️ Interaction Guide
+
+| Action                     | Result                                 |
+| :------------------------- | :------------------------------------- |
+| **Drag Mouse / Touch**     | Pan around the 360° sphere.            |
+| **Hover on Marker**        | Preview component title/glow.          |
+| **Left Click Marker**      | Expand/Collapse detail card.           |
+| **SHIFT + Left Click**     | Open Editor at targeted 3D coordinate. |
+| **Navigation Pills**       | Click to move to the connected room.   |
+| **Room Selector (Bottom)** | Quick jump to any room in the tour.    |
+
+---
+
+## 📂 Project Structure
+
+- `src/components/PanoramaViewer.tsx`: Core R3F sphere rendering and interaction logic.
+- `src/components/XRComponentRenderer.tsx`: Dynamic glassmorphic card generator for all 6 annotation types.
+- `src/components/ComponentEditor.tsx`: Advanced form for configuring component data & API fetching.
+- `src/components/TourNavigation.tsx`: Global navigation and room management portal.
+- `src/types/roomComponents.ts`: Unified schema for spatial data and API configurations.
+
+---
+
+## 🛸 API Components
+
+The system supports a powerful **API Render Type**. You can point a component at a URL (e.g., a Greenhouse sensor or Device Status JSON), and the 3D card will:
+
+1. Fetch data on room entry.
+2. Auto-refresh at user-defined intervals.
+3. Show shimmer loading states & error recovery UI.
+4. Render as any of the 5 base types using a dynamic JSON schema.
+
+---
+
+_Phase 1 Prototype - Spatial Tour System (Built for Gemini 3.5 & V-OS Simulation)_
