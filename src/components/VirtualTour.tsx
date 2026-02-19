@@ -12,10 +12,15 @@ import {
   loadZindData,
   parseZindData,
   groupPanosByRoom,
+  preloadPanoramaImages,
 } from "../utils/zindDataParser";
 import type { ParsedPano, RoomGroup } from "../utils/zindDataParser";
 import type { RoomComponent } from "../types/roomComponents";
-import { addComponent } from "../utils/componentStorage";
+import {
+  addComponent,
+  updateComponent,
+  deleteComponent,
+} from "../utils/componentStorage";
 import type { NavigationMarker } from "../types/navigationMarkers";
 import { addNavigationMarker } from "../utils/navigationMarkerStorage";
 
@@ -24,6 +29,10 @@ const VirtualTour: React.FC = () => {
   const [roomGroups, setRoomGroups] = useState<RoomGroup[]>([]);
   const [currentPano, setCurrentPano] = useState<ParsedPano | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState<{
+    loaded: number;
+    total: number;
+  }>({ loaded: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
 
   // XR Edit Mode State
@@ -36,6 +45,8 @@ const VirtualTour: React.FC = () => {
   const [selectedPosition, setSelectedPosition] = useState<
     [number, number, number] | null
   >(null);
+  const [editingComponent, setEditingComponent] =
+    useState<RoomComponent | null>(null);
   const [componentRefresh, setComponentRefresh] = useState(0);
   const [navMarkerRefresh, setNavMarkerRefresh] = useState(0);
 
@@ -62,6 +73,15 @@ const VirtualTour: React.FC = () => {
         const startPano =
           livingRoom?.primaryPano || rooms[0]?.primaryPano || panos[0];
         setCurrentPano(startPano);
+
+        // Preload all panorama images to prevent white flashes
+        console.log("Preloading panorama images...");
+        setLoadingProgress({ loaded: 0, total: panos.length });
+        await preloadPanoramaImages(panos, (loaded, total) => {
+          setLoadingProgress({ loaded, total });
+          console.log(`Preloaded ${loaded}/${total} panoramas`);
+        });
+        console.log("All panoramas preloaded!");
 
         setLoading(false);
       } catch (err) {
@@ -96,20 +116,42 @@ const VirtualTour: React.FC = () => {
     }
   };
 
-  // Save new component
+  // Save new or edited component
   const handleSaveComponent = (
     componentData: Omit<RoomComponent, "id" | "createdAt">,
   ) => {
-    const newComponent: RoomComponent = {
-      ...componentData,
-      id: crypto.randomUUID(),
-      createdAt: Date.now(),
-    };
+    if (editingComponent) {
+      // Update existing component
+      updateComponent(editingComponent.id, componentData);
+      setEditingComponent(null);
+    } else {
+      // Add new component
+      const newComponent: RoomComponent = {
+        ...componentData,
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+      };
+      addComponent(newComponent);
+    }
 
-    addComponent(newComponent);
     setComponentRefresh((prev) => prev + 1); // Trigger re-render in PanoramaViewer
     setShowComponentEditor(false);
     setSelectedPosition(null);
+  };
+
+  // Edit existing component
+  const handleEditComponent = (component: RoomComponent) => {
+    setEditingComponent(component);
+    setSelectedPosition(component.position);
+    setShowComponentEditor(true);
+  };
+
+  // Delete component
+  const handleDeleteComponent = (componentId: string) => {
+    if (window.confirm("Delete this component?")) {
+      deleteComponent(componentId);
+      setComponentRefresh((prev) => prev + 1);
+    }
   };
 
   // Save new navigation marker
@@ -143,7 +185,12 @@ const VirtualTour: React.FC = () => {
   };
 
   if (loading) {
-    return <LoadingScreen message="Loading virtual tour..." />;
+    return (
+      <LoadingScreen
+        message="Loading virtual tour..."
+        progress={loadingProgress}
+      />
+    );
   }
 
   if (error) {
@@ -177,6 +224,8 @@ const VirtualTour: React.FC = () => {
               allPanos={allPanos}
               isEditMode={isEditMode}
               onCoordinateClick={handleCoordinateClick}
+              onEditComponent={handleEditComponent}
+              onDeleteComponent={handleDeleteComponent}
               key={`${currentPano.id}-${componentRefresh}-${navMarkerRefresh}`}
             />
           </Suspense>
@@ -274,11 +323,12 @@ const VirtualTour: React.FC = () => {
           onClose={() => {
             setShowComponentEditor(false);
             setSelectedPosition(null);
+            setEditingComponent(null);
           }}
           onSave={handleSaveComponent}
           position={selectedPosition}
           roomLabel={currentPano.label}
-          editingComponent={null}
+          editingComponent={editingComponent}
         />
       )}
 

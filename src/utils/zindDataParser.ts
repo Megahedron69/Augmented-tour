@@ -105,6 +105,43 @@ export function groupPanosByRoom(panos: ParsedPano[]): RoomGroup[] {
 }
 
 /**
+ * Preload panorama images to prevent white flashes
+ * Returns a promise that resolves when all images are loaded
+ */
+export async function preloadPanoramaImages(
+  panos: ParsedPano[],
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<void> {
+  const total = panos.length;
+  let loaded = 0;
+
+  const loadPromises = panos.map((pano) => {
+    return new Promise<void>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        loaded++;
+        if (onProgress) {
+          onProgress(loaded, total);
+        }
+        resolve();
+      };
+      img.onerror = () => {
+        console.warn(`Failed to preload image: ${pano.imagePath}`);
+        loaded++;
+        if (onProgress) {
+          onProgress(loaded, total);
+        }
+        // Resolve anyway to not block other images
+        resolve();
+      };
+      img.src = pano.imagePath;
+    });
+  });
+
+  await Promise.all(loadPromises);
+}
+
+/**
  * Load ZInD data from JSON file
  */
 export async function loadZindData(

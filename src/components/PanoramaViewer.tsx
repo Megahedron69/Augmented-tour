@@ -12,6 +12,7 @@ import { MousePointerClick, DoorOpen, MoveRight } from "lucide-react";
 import type { ParsedPano } from "../utils/zindDataParser";
 import { getRoomDestinations } from "../constants/roomMarkers";
 import { getComponentsForRoom } from "../utils/componentStorage";
+import type { RoomComponent } from "../types/roomComponents";
 import { getMarkersForRoom } from "../utils/navigationMarkerStorage";
 import { XRComponentRenderer } from "./XRComponentRenderer";
 import "./PanoramaViewer.css";
@@ -23,6 +24,8 @@ interface PanoramaViewerProps {
   allPanos?: ParsedPano[];
   isEditMode?: boolean;
   onCoordinateClick?: (coords: [number, number, number]) => void;
+  onEditComponent?: (component: RoomComponent) => void;
+  onDeleteComponent?: (componentId: string) => void;
 }
 
 /**
@@ -148,6 +151,8 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
   allPanos = [],
   isEditMode = false,
   onCoordinateClick,
+  onEditComponent,
+  onDeleteComponent,
 }) => {
   const sphereRef = useRef<THREE.Mesh>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
@@ -398,12 +403,8 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
             component={component}
             position={componentPos}
             isEditMode={isEditMode}
-            onEdit={() => {
-              // Will be handled by parent component
-            }}
-            onDelete={() => {
-              // Will be handled by parent component
-            }}
+            onEdit={onEditComponent}
+            onDelete={onDeleteComponent}
           />
         );
       })}
@@ -450,9 +451,9 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
                   : "Move your cursor over the panorama to preview coordinates, then hold SHIFT and click to place."}
               </div>
 
-              <div className="edit-help-coords">
+              {/* <div className="edit-help-coords">
                 [{hoveredCoords[0]}, {hoveredCoords[1]}, {hoveredCoords[2]}]
-              </div>
+              </div> */}
             </div>
           </div>
         </Html>
