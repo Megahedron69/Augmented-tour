@@ -22,7 +22,13 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({
         <h2>{message}</h2>
         <p>Please wait while we prepare your virtual tour experience</p>
         {showProgress && (
-          <div style={{ marginTop: "20px", width: "300px" }}>
+          <div
+            style={{
+              margin: "20px auto 0",
+              width: "300px",
+              textAlign: "center",
+            }}
+          >
             <div
               style={{
                 width: "100%",

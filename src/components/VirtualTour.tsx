@@ -1,13 +1,23 @@
 import React, { useState, useEffect, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { Canvas } from "@react-three/fiber";
-import { motion } from "framer-motion";
-import { Edit3, Eye, RotateCcw, Package, DoorOpen } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Edit3,
+  Eye,
+  RotateCcw,
+  Package,
+  DoorOpen,
+  Map,
+  MapPin,
+  X,
+} from "lucide-react";
 import "./VirtualTour.css";
 import PanoramaViewer from "./PanoramaViewer.tsx";
-import TourNavigation from "./TourNavigation.tsx";
 import LoadingScreen from "./LoadingScreen.tsx";
 import { ComponentEditor } from "./ComponentEditor.tsx";
 import { NavigationMarkerEditor } from "./NavigationMarkerEditor.tsx";
+import { FloorPlan2D } from "./FloorPlan2D.tsx";
 import {
   loadZindData,
   parseZindData,
@@ -49,6 +59,12 @@ const VirtualTour: React.FC = () => {
     useState<RoomComponent | null>(null);
   const [componentRefresh, setComponentRefresh] = useState(0);
   const [navMarkerRefresh, setNavMarkerRefresh] = useState(0);
+
+  // Floor Plan State
+  const [showFloorPlan, setShowFloorPlan] = useState(false);
+
+  // Room Selector State
+  const [showRoomSelector, setShowRoomSelector] = useState(false);
 
   // Load and parse ZInD data on mount
   useEffect(() => {
@@ -232,27 +248,34 @@ const VirtualTour: React.FC = () => {
         </Canvas>
       </div>
 
-      <TourNavigation
-        roomGroups={roomGroups}
-        currentPano={currentPano}
-        onRoomChange={handleRoomChange}
-      />
+      <div className="top-right-controls">
+        {/* Floor Plan Toggle Button */}
+        <motion.button
+          className={`floor-plan-toggle ${showFloorPlan ? "active" : ""}`}
+          onClick={() => setShowFloorPlan(!showFloorPlan)}
+          title={showFloorPlan ? "Close Floor Plan" : "Open Floor Plan"}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          <Map size={24} strokeWidth={2} />
+        </motion.button>
 
-      {/* Edit Mode Toggle Button */}
-      <motion.button
-        className={`edit-mode-toggle ${isEditMode ? "active" : ""}`}
-        onClick={() => setIsEditMode(!isEditMode)}
-        title={isEditMode ? "Exit Edit Mode" : "Enter Edit Mode"}
-        layoutId="editToggle"
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.95 }}
-      >
-        {isEditMode ? (
-          <Eye size={24} strokeWidth={2} />
-        ) : (
-          <Edit3 size={24} strokeWidth={2} />
-        )}
-      </motion.button>
+        {/* Edit Mode Toggle Button */}
+        <motion.button
+          className={`edit-mode-toggle ${isEditMode ? "active" : ""}`}
+          onClick={() => setIsEditMode(!isEditMode)}
+          title={isEditMode ? "Exit Edit Mode" : "Enter Edit Mode"}
+          layoutId="editToggle"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          {isEditMode ? (
+            <Eye size={24} strokeWidth={2} />
+          ) : (
+            <Edit3 size={24} strokeWidth={2} />
+          )}
+        </motion.button>
+      </div>
 
       {/* Reset XR Components Button */}
       {isEditMode && (
@@ -304,8 +327,27 @@ const VirtualTour: React.FC = () => {
       )}
 
       {/* Info Panel */}
-      <div className="info-panel">
-        <h3>{currentPano.label}</h3>
+      <motion.div
+        className="info-panel"
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: 0.2, type: "spring", damping: 20, stiffness: 300 }}
+      >
+        <div className="info-panel-header">
+          <h3>
+            {currentPano.label.charAt(0).toUpperCase() +
+              currentPano.label.slice(1)}
+          </h3>
+          <motion.button
+            className="room-selector-btn"
+            onClick={() => setShowRoomSelector(!showRoomSelector)}
+            title="Select Room"
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <MapPin size={18} />
+          </motion.button>
+        </div>
         <p className="pano-info">
           Floor {currentPano.floorNumber} • Camera Height:{" "}
           {currentPano.cameraHeight.toFixed(2)}m
@@ -314,7 +356,82 @@ const VirtualTour: React.FC = () => {
           <span>{allPanos.length} total views</span>
           <span>{roomGroups.length} rooms</span>
         </div>
-      </div>
+      </motion.div>
+
+      {/* Room Selector Modal - portalled to body to escape transformed parent */}
+      {createPortal(
+        <AnimatePresence>
+          {showRoomSelector && (
+            <>
+              {/* Backdrop */}
+              <motion.div
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.45)",
+                  backdropFilter: "blur(6px)",
+                  zIndex: 999,
+                }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowRoomSelector(false)}
+              />
+
+              {/* Panel */}
+              <motion.div
+                className="selector-panel rooms-panel"
+                style={{
+                  position: "fixed",
+                  top: "50%",
+                  left: "50%",
+                  zIndex: 1000,
+                }}
+                initial={{ opacity: 0, scale: 0.94, x: "-50%", y: "-46%" }}
+                animate={{ opacity: 1, scale: 1, x: "-50%", y: "-50%" }}
+                exit={{ opacity: 0, scale: 0.94, x: "-50%", y: "-46%" }}
+                transition={{ type: "spring", damping: 22, stiffness: 320 }}
+              >
+                <div className="panel-header">
+                  <h4>Select Room</h4>
+                  <motion.button
+                    onClick={() => setShowRoomSelector(false)}
+                    className="close-panel-btn"
+                    whileHover={{ rotate: 90, scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <X size={18} />
+                  </motion.button>
+                </div>
+                <div className="room-grid">
+                  {roomGroups.map((room, idx) => (
+                    <motion.button
+                      key={room.label}
+                      className={`room-card ${room.label === currentPano.label ? "active" : ""}`}
+                      onClick={() => {
+                        handleRoomChange(room.label);
+                        setShowRoomSelector(false);
+                      }}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ delay: idx * 0.04 }}
+                      whileHover={{ scale: 1.03, y: -3 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <div className="room-name">
+                        {room.label.charAt(0).toUpperCase() +
+                          room.label.slice(1)}
+                      </div>
+                    </motion.button>
+                  ))}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
 
       {/* Component Editor Modal */}
       {selectedPosition && currentPano && (
@@ -346,6 +463,26 @@ const VirtualTour: React.FC = () => {
           availableRooms={roomGroups.map((r) => r.label)}
         />
       )}
+
+      {/* Floor Plan Overlay */}
+      <AnimatePresence>
+        {showFloorPlan && (
+          <motion.div
+            className="floor-plan-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <FloorPlan2D
+              roomGroups={roomGroups}
+              currentRoom={currentPano?.label || ""}
+              onRoomClick={handleRoomChange}
+              onClose={() => setShowFloorPlan(false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -1,0 +1,540 @@
+/**
+ * Floor Plan 2D Styles
+ */
+
+.floor-plan-2d {
+  width: 100%;
+  height: 100vh;
+  background: #0f0f1e;
+  position: relative;
+}
+
+.floor-plan-2d.compact {
+  height: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Close Button */
+.floor-plan-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 100, 100, 0.2) 0%,
+    rgba(255, 100, 100, 0.1) 100%
+  );
+  backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 100, 100, 0.3);
+  color: #ff6b6b;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.floor-plan-close:hover {
+  transform: scale(1.1);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 100, 100, 0.3) 0%,
+    rgba(255, 100, 100, 0.15) 100%
+  );
+  border-color: rgba(255, 100, 100, 0.5);
+  box-shadow:
+    0 0 20px rgba(255, 107, 107, 0.4),
+    0 4px 20px rgba(0, 0, 0, 0.6);
+}
+
+/* React Flow overrides */
+.floor-plan-2d .react-flow__attribution {
+  display: none;
+}
+
+.floor-plan-2d .react-flow__controls {
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid #00d9ff;
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+}
+
+.floor-plan-2d .react-flow__controls-button {
+  background: transparent;
+  border: none;
+  color: #00d9ff;
+  border-bottom: 1px solid rgba(0, 217, 255, 0.2);
+}
+
+.floor-plan-2d .react-flow__controls-button:hover {
+  background: rgba(0, 217, 255, 0.1);
+  color: #00ffee;
+}
+
+.floor-plan-2d .react-flow__minimap {
+  border-radius: 8px;
+}
+
+/* Edge hover states */
+.floor-plan-2d .react-flow__edge.edge-dim .react-flow__edge-path {
+  opacity: 0.08;
+}
+
+.floor-plan-2d .react-flow__edge.edge-incoming .react-flow__edge-path,
+.floor-plan-2d .react-flow__edge.edge-outgoing .react-flow__edge-path,
+.floor-plan-2d .react-flow__edge.edge-bidirectional .react-flow__edge-path {
+  opacity: 0.9;
+}
+
+/* Room Node Styles - Changed to SQUARES */
+.room-node {
+  position: relative;
+  cursor: pointer;
+  width: 90px;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.room-node:hover {
+  z-index: 5;
+}
+
+.room-node .react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: #00d9ff;
+  border: 2px solid #0f0f1e;
+  opacity: 0;
+}
+
+/* Room Square (changed from circle) */
+.room-square {
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  background: rgba(26, 26, 46, 0.95);
+  border: 2px solid #00d9ff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  position: relative;
+}
+
+.room-node:hover .room-square {
+  transform: scale(1.05);
+  border-color: #00ffee;
+  box-shadow:
+    0 0 20px rgba(0, 217, 255, 0.5),
+    0 4px 20px rgba(0, 0, 0, 0.6);
+}
+
+.room-node.current .room-square {
+  background: linear-gradient(
+    135deg,
+    rgba(0, 217, 255, 0.2),
+    rgba(0, 255, 238, 0.1)
+  );
+  border: 3px solid #00ffee;
+  box-shadow:
+    0 0 30px rgba(0, 255, 238, 0.6),
+    0 4px 24px rgba(0, 0, 0, 0.6);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.current-chip {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #0f0f1e;
+  background: #00ffee;
+  box-shadow: 0 2px 8px rgba(0, 255, 238, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 30px rgba(0, 255, 238, 0.6),
+      0 4px 24px rgba(0, 0, 0, 0.6);
+  }
+  50% {
+    box-shadow:
+      0 0 40px rgba(0, 255, 238, 0.8),
+      0 4px 28px rgba(0, 0, 0, 0.7);
+  }
+}
+.room-label-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.room-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  text-align: center;
+  padding: 0 2px;
+  line-height: 1.2;
+  max-width: 50px;
+  word-wrap: break-word;
+}
+
+.room-label-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: rgba(0, 217, 255, 0.8);
+}
+
+.room-node.current .room-label {
+  color: #00ffee;
+  font-weight: 700;
+}
+
+.room-node.current .room-label-icon {
+  color: #00ffee;
+}
+
+/* XR Component Indicator */
+.component-indicator {
+  position: absolute;
+  top: -10px;
+  right: -15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0f0f1e;
+  background: linear-gradient(135deg, #00ffee, #7af7ff);
+  box-shadow:
+    0 4px 12px rgba(0, 255, 238, 0.35),
+    0 0 10px rgba(0, 217, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.indicator-label {
+  font-size: 9px;
+}
+
+.indicator-count {
+  background: rgba(15, 15, 30, 0.9);
+  color: #00ffee;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* Component Tooltip */
+.component-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 10px;
+  width: min(260px, 72vw);
+  background: rgba(26, 26, 46, 0.98);
+  border: 1px solid rgba(0, 217, 255, 0.5);
+  border-radius: 10px;
+  padding: 12px;
+  backdrop-filter: blur(16px);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.55),
+    0 0 12px rgba(0, 217, 255, 0.25);
+  z-index: 9999;
+  animation: tooltipFadeIn 0.15s ease;
+  pointer-events: none;
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.tooltip-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(0, 217, 255, 0.2);
+  color: #8fefff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tooltip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tooltip-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  padding: 6px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+}
+
+.comp-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.35);
+}
+
+.comp-type-infobox {
+  background: #3498db;
+  color: white;
+}
+
+.comp-dot.comp-type-infobox {
+  background: #3498db;
+}
+
+.comp-dot.comp-type-alert {
+  background: #e74c3c;
+}
+
+.comp-dot.comp-type-asset {
+  background: #9b59b6;
+}
+
+.comp-dot.comp-type-api {
+  background: #f39c12;
+}
+
+.comp-dot.comp-type-image {
+  background: #1abc9c;
+}
+
+.comp-dot.comp-type-instruction {
+  background: #e74c3c;
+}
+
+.comp-type-status {
+  background: #f59e0b;
+  color: white;
+}
+
+.comp-dot.comp-type-status {
+  background: #f59e0b;
+}
+
+.comp-type-alert {
+  background: #e74c3c;
+  color: white;
+}
+
+.comp-type-asset {
+  background: #9b59b6;
+  color: white;
+}
+
+.comp-type-api {
+  background: #f39c12;
+  color: white;
+}
+
+.comp-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.comp-title {
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: clamp(12px, 2.4vw, 13px);
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.comp-subtext {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: clamp(10px, 2.2vw, 12px);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Legend */
+.floor-plan-legend {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid #00d9ff;
+  border-radius: 12px;
+  padding: 16px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+}
+
+.legend-header {
+  font-size: 14px;
+  font-weight: 700;
+  color: #00d9ff;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+}
+
+.legend-item:last-child {
+  margin-bottom: 0;
+}
+
+.legend-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-line {
+  width: 30px;
+  height: 2px;
+  flex-shrink: 0;
+}
+
+.legend-circle {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid;
+  flex-shrink: 0;
+}
+
+.legend-square {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 2px solid;
+  flex-shrink: 0;
+}
+
+.legend-square.current {
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+.legend-note {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 217, 255, 0.2);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  font-style: italic;
+}
+
+@keyframes pulse-border {
+  0%,
+  100% {
+    box-shadow: 0 0 5px rgba(0, 255, 238, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 10px rgba(0, 255, 238, 0.8);
+  }
+}
+
+/* Minimap overlay (when used as overlay in VirtualTour) */
+.floor-plan-minimap-overlay {
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  width: 300px;
+  height: 220px;
+  background: rgba(15, 15, 30, 0.95);
+  border: 2px solid #00d9ff;
+  border-radius: 12px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  z-index: 100;
+}
+
+.floor-plan-minimap-overlay .room-node {
+  width: 60px;
+  height: 60px;
+}
+
+.floor-plan-minimap-overlay .room-square {
+  width: 50px;
+  height: 50px;
+}
+
+.floor-plan-minimap-overlay .room-label {
+  font-size: 8px;
+  max-width: 45px;
+}
+
+.floor-plan-minimap-overlay .component-indicator {
+  padding: 2px 4px;
+  font-size: 8px;
+  gap: 2px;
+}
+
+.floor-plan-minimap-overlay .component-indicator svg {
+  width: 8px;
+  height: 8px;
+}
+
+.floor-plan-minimap-overlay .current-indicator {
+  font-size: 8px;
+  padding: 2px 6px;
+  bottom: -18px;
+}

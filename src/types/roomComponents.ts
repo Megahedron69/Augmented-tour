@@ -65,11 +65,11 @@ export interface RoomComponentsStorage {
 export const getStatusColor = (status: StatusType): string => {
   switch (status) {
     case "working":
-      return "#00ff88";
+      return "#f59e0b";
     case "warning":
-      return "#ffaa00";
+      return "#ff6b6b";
     case "error":
-      return "#ff3355";
+      return "#ef4444";
     default:
       return "#00d9ff";
   }
@@ -79,11 +79,11 @@ export const getStatusColor = (status: StatusType): string => {
 export const getAlertColor = (severity: AlertSeverity): string => {
   switch (severity) {
     case "warning":
-      return "#ffaa00";
+      return "#f59e0b";
     case "danger":
-      return "#ff3355";
+      return "#ef4444";
     default:
-      return "#ffaa00";
+      return "#f59e0b";
   }
 };
 
