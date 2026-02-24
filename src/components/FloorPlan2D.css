@@ -53,6 +53,43 @@
     0 4px 20px rgba(0, 0, 0, 0.6);
 }
 
+.floor-plan-floor-tabs {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 1000;
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 217, 255, 0.35);
+  background: rgba(26, 26, 46, 0.92);
+  backdrop-filter: blur(10px);
+}
+
+.floor-plan-floor-tabs button {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.floor-plan-floor-tabs button:hover {
+  border-color: rgba(0, 217, 255, 0.6);
+  color: #c8fbff;
+}
+
+.floor-plan-floor-tabs button.active {
+  border-color: rgba(0, 217, 255, 0.8);
+  color: #00ffee;
+  background: rgba(0, 217, 255, 0.18);
+}
+
 /* React Flow overrides */
 .floor-plan-2d .react-flow__attribution {
   display: none;
@@ -90,6 +127,10 @@
 .floor-plan-2d .react-flow__edge.edge-outgoing .react-flow__edge-path,
 .floor-plan-2d .react-flow__edge.edge-bidirectional .react-flow__edge-path {
   opacity: 0.9;
+}
+
+.floor-plan-2d .react-flow__edge.edge-cross-floor .react-flow__edge-path {
+  opacity: 0.75;
 }
 
 /* Room Node Styles - Changed to SQUARES */

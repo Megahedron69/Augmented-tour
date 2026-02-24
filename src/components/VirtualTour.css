@@ -290,6 +290,37 @@
   overflow-y: auto;
 }
 
+.room-floor-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 24px 0;
+}
+
+.room-floor-filter button {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 0.82em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.room-floor-filter button:hover {
+  border-color: rgba(0, 217, 255, 0.6);
+  color: #c8fbff;
+}
+
+.room-floor-filter button.active {
+  border-color: rgba(0, 217, 255, 0.8);
+  background: rgba(0, 217, 255, 0.2);
+  color: #00ffee;
+  box-shadow: 0 0 12px rgba(0, 217, 255, 0.22);
+}
+
 .room-card {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.16);

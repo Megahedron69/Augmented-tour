@@ -15,6 +15,7 @@ import { getComponentsForRoom } from "../utils/componentStorage";
 import type { RoomComponent } from "../types/roomComponents";
 import { getMarkersForRoom } from "../utils/navigationMarkerStorage";
 import { XRComponentRenderer } from "./XRComponentRenderer";
+import { textureCache } from "../utils/textureCache";
 import "./PanoramaViewer.css";
 
 interface PanoramaViewerProps {
@@ -212,28 +213,23 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
     setTexture(fallbackTexture);
   }, [pano]);
 
-  // Load panorama texture
+  // Load panorama texture from cache (prevents white flash)
   useEffect(() => {
     let isMounted = true;
-    const loader = new THREE.TextureLoader();
 
-    loader.load(
-      pano.imagePath,
-      (loadedTexture) => {
+    textureCache
+      .getTexture(pano.imagePath)
+      .then((loadedTexture) => {
         if (isMounted) {
-          loadedTexture.mapping = THREE.EquirectangularReflectionMapping;
-          loadedTexture.colorSpace = THREE.SRGBColorSpace;
           setTexture(loadedTexture);
         }
-      },
-      undefined,
-      (error) => {
+      })
+      .catch((error) => {
         console.error("Error loading panorama:", pano.imagePath, error);
         if (isMounted) {
           createFallbackTexture();
         }
-      },
-    );
+      });
 
     return () => {
       isMounted = false;

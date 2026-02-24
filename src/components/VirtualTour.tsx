@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, Suspense, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Canvas } from "@react-three/fiber";
 import { motion, AnimatePresence } from "framer-motion";
@@ -24,6 +24,8 @@ import {
   groupPanosByRoom,
   preloadPanoramaImages,
 } from "../utils/zindDataParser";
+import { MANUAL_PANOS } from "../constants/manualPanos";
+import { textureCache } from "../utils/textureCache";
 import type { ParsedPano, RoomGroup } from "../utils/zindDataParser";
 import type { RoomComponent } from "../types/roomComponents";
 import {
@@ -65,6 +67,9 @@ const VirtualTour: React.FC = () => {
 
   // Room Selector State
   const [showRoomSelector, setShowRoomSelector] = useState(false);
+  const [selectedRoomFloor, setSelectedRoomFloor] = useState<number | "all">(
+    "all",
+  );
 
   // Load and parse ZInD data on mount
   useEffect(() => {
@@ -72,7 +77,12 @@ const VirtualTour: React.FC = () => {
       try {
         setLoading(true);
         const data = await loadZindData();
-        const panos = parseZindData(data);
+        const panos = [...parseZindData(data), ...MANUAL_PANOS].sort((a, b) => {
+          if (a.floorNumber !== b.floorNumber) {
+            return a.floorNumber - b.floorNumber;
+          }
+          return a.label.localeCompare(b.label);
+        });
         const rooms = groupPanosByRoom(panos);
 
         console.log(
@@ -99,6 +109,11 @@ const VirtualTour: React.FC = () => {
         });
         console.log("All panoramas preloaded!");
 
+        // Prime Three.js texture cache from preloaded images
+        console.log("Priming texture cache...");
+        await textureCache.preloadTextures(panos.map((p) => p.imagePath));
+        console.log("Texture cache primed!");
+
         setLoading(false);
       } catch (err) {
         console.error("Error loading ZInD data:", err);
@@ -120,6 +135,26 @@ const VirtualTour: React.FC = () => {
       setCurrentPano(room.primaryPano);
     }
   };
+
+  const availableFloors = useMemo(() => {
+    const floors = new Set<number>();
+    roomGroups.forEach((room) => {
+      if (room.primaryPano) {
+        floors.add(room.primaryPano.floorNumber);
+      }
+    });
+    return [...floors].sort((a, b) => a - b);
+  }, [roomGroups]);
+
+  const filteredRoomGroups = useMemo(() => {
+    if (selectedRoomFloor === "all") {
+      return roomGroups;
+    }
+
+    return roomGroups.filter(
+      (room) => room.primaryPano?.floorNumber === selectedRoomFloor,
+    );
+  }, [roomGroups, selectedRoomFloor]);
 
   // Handle coordinate click in edit mode
   const handleCoordinateClick = (coords: [number, number, number]) => {
@@ -355,6 +390,7 @@ const VirtualTour: React.FC = () => {
         <div className="stats">
           <span>{allPanos.length} total views</span>
           <span>{roomGroups.length} rooms</span>
+          <span>{availableFloors.length} floors</span>
         </div>
       </motion.div>
 
@@ -403,8 +439,27 @@ const VirtualTour: React.FC = () => {
                     <X size={18} />
                   </motion.button>
                 </div>
+                <div className="room-floor-filter">
+                  <button
+                    className={selectedRoomFloor === "all" ? "active" : ""}
+                    onClick={() => setSelectedRoomFloor("all")}
+                    type="button"
+                  >
+                    All Floors
+                  </button>
+                  {availableFloors.map((floor) => (
+                    <button
+                      key={floor}
+                      className={selectedRoomFloor === floor ? "active" : ""}
+                      onClick={() => setSelectedRoomFloor(floor)}
+                      type="button"
+                    >
+                      Floor {floor}
+                    </button>
+                  ))}
+                </div>
                 <div className="room-grid">
-                  {roomGroups.map((room, idx) => (
+                  {filteredRoomGroups.map((room, idx) => (
                     <motion.button
                       key={room.label}
                       className={`room-card ${room.label === currentPano.label ? "active" : ""}`}
@@ -422,6 +477,9 @@ const VirtualTour: React.FC = () => {
                       <div className="room-name">
                         {room.label.charAt(0).toUpperCase() +
                           room.label.slice(1)}
+                      </div>
+                      <div className="room-stats">
+                        Floor {room.primaryPano?.floorNumber ?? "-"}
                       </div>
                     </motion.button>
                   ))}

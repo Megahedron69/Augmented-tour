@@ -118,6 +118,7 @@ export async function preloadPanoramaImages(
   const loadPromises = panos.map((pano) => {
     return new Promise<void>((resolve) => {
       const img = new Image();
+      img.crossOrigin = "anonymous";
       img.onload = () => {
         loaded++;
         if (onProgress) {

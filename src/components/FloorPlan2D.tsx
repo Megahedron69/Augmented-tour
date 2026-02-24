@@ -18,6 +18,7 @@ import { X } from "lucide-react";
 import type { RoomGroup } from "../utils/zindDataParser";
 import { ROOM_MARKERS } from "../constants/roomMarkers";
 import { getComponentsForRoom } from "../utils/componentStorage";
+import { loadNavigationMarkers } from "../utils/navigationMarkerStorage";
 import type { RoomComponent } from "../types/roomComponents";
 import { RoomNode } from "./RoomNode.tsx";
 import "./FloorPlan2D.css";
@@ -184,26 +185,78 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
   compact = false,
 }) => {
   const [hoveredRoom, setHoveredRoom] = useState<string | null>(null);
+  const [selectedFloor, setSelectedFloor] = useState<number | "all">("all");
+
+  const roomFloorMap = useMemo(() => {
+    const map = new Map<string, number>();
+    roomGroups.forEach((room) => {
+      if (room.primaryPano) {
+        map.set(room.label.toLowerCase(), room.primaryPano.floorNumber);
+      }
+    });
+    return map;
+  }, [roomGroups]);
+
+  const availableFloors = useMemo(() => {
+    const floors = new Set<number>();
+    roomGroups.forEach((room) => {
+      if (room.primaryPano) {
+        floors.add(room.primaryPano.floorNumber);
+      }
+    });
+    return [...floors].sort((a, b) => a - b);
+  }, [roomGroups]);
 
   // Build graph data
   const { nodes, edges } = useMemo(() => {
-    // Extract connections from ROOM_MARKERS
-    const connections: [string, string][] = [];
+    // Extract connections from ROOM_MARKERS + dynamic localStorage markers
+    const allConnections: [string, string][] = [];
     Object.entries(ROOM_MARKERS).forEach(([fromRoom, destinations]) => {
       Object.keys(destinations).forEach((toRoom) => {
-        connections.push([fromRoom.toLowerCase(), toRoom.toLowerCase()]);
+        allConnections.push([fromRoom.toLowerCase(), toRoom.toLowerCase()]);
       });
     });
 
+    const dynamicMarkers = loadNavigationMarkers();
+    Object.entries(dynamicMarkers).forEach(([fromRoom, markers]) => {
+      markers.forEach((marker) => {
+        allConnections.push([
+          fromRoom.toLowerCase(),
+          marker.toRoom.toLowerCase().trim(),
+        ]);
+      });
+    });
+
+    const visibleRooms = roomGroups.filter((room) => {
+      if (selectedFloor === "all") return true;
+      return room.primaryPano?.floorNumber === selectedFloor;
+    });
+
+    const visibleRoomKeys = new Set(
+      visibleRooms.map((room) => room.label.toLowerCase()),
+    );
+
+    const connections = allConnections.filter(([from, to]) => {
+      if (!visibleRoomKeys.has(from) || !visibleRoomKeys.has(to)) {
+        return false;
+      }
+
+      if (selectedFloor === "all") {
+        return true;
+      }
+
+      return roomFloorMap.get(from) === selectedFloor;
+    });
+
     // Calculate positions
-    const positions = calculateRoomPositions(roomGroups, connections);
+    const positions = calculateRoomPositions(visibleRooms, connections);
 
     const connectionSet = new Set(
       connections.map(([from, to]) => `${from}->${to}`),
     );
 
     // Create nodes
-    const flowNodes: Node<RoomNodeData>[] = roomGroups.map((room) => {
+    const flowNodes: Node<RoomNodeData>[] = visibleRooms.map((room) => {
       const roomKey = room.label.toLowerCase();
       const components = getComponentsForRoom(room.label) || [];
       const pos = positions.get(roomKey) || { x: 400, y: 300 };
@@ -225,6 +278,14 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
 
     // Create edges: thin, curved, bidirectional markers for clarity
     const flowEdges: Edge[] = connections.map(([from, to], i) => {
+      const fromFloor = roomFloorMap.get(from);
+      const toFloor = roomFloorMap.get(to);
+      const isCrossFloor =
+        selectedFloor === "all" &&
+        fromFloor !== undefined &&
+        toFloor !== undefined &&
+        fromFloor !== toFloor;
+
       const isBidirectional = hoveredRoom
         ? (from === hoveredRoom && connectionSet.has(`${to}->${from}`)) ||
           (to === hoveredRoom && connectionSet.has(`${from}->${to}`))
@@ -244,7 +305,9 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
           ? "#ff6bd6"
           : isOutgoing
             ? "#00ffee"
-            : "#00d9ff";
+            : isCrossFloor
+              ? "#9d7bff"
+              : "#00d9ff";
 
       return {
         id: `edge-${i}`,
@@ -260,12 +323,15 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
             ? "edge-outgoing"
             : isBidirectional
               ? "edge-bidirectional"
-              : isDimmed
-                ? "edge-dim"
-                : "",
+              : isCrossFloor
+                ? "edge-cross-floor"
+                : isDimmed
+                  ? "edge-dim"
+                  : "",
         style: {
           stroke: edgeColor,
           strokeWidth: isIncoming || isOutgoing || isBidirectional ? 2 : 1.5,
+          strokeDasharray: isCrossFloor ? "6 4" : undefined,
           opacity: isDimmed ? 0.08 : isIncoming || isOutgoing ? 0.9 : 0.45,
         },
         markerStart: {
@@ -284,7 +350,14 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
     });
 
     return { nodes: flowNodes, edges: flowEdges };
-  }, [roomGroups, currentRoom, onRoomClick, hoveredRoom]);
+  }, [
+    roomGroups,
+    currentRoom,
+    onRoomClick,
+    hoveredRoom,
+    roomFloorMap,
+    selectedFloor,
+  ]);
 
   const nodeTypes: NodeTypes = useMemo(() => ({ roomNode: RoomNode }), []);
 
@@ -306,6 +379,28 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
         >
           <X size={24} />
         </button>
+      )}
+
+      {!compact && (
+        <div className="floor-plan-floor-tabs">
+          <button
+            type="button"
+            className={selectedFloor === "all" ? "active" : ""}
+            onClick={() => setSelectedFloor("all")}
+          >
+            All
+          </button>
+          {availableFloors.map((floor) => (
+            <button
+              key={floor}
+              type="button"
+              className={selectedFloor === floor ? "active" : ""}
+              onClick={() => setSelectedFloor(floor)}
+            >
+              Floor {floor}
+            </button>
+          ))}
+        </div>
       )}
 
       <ReactFlow
@@ -365,6 +460,13 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
               style={{ background: "#ffb347" }}
             ></div>
             <span>Bidirectional Paths</span>
+          </div>
+          <div className="legend-item">
+            <div
+              className="legend-line"
+              style={{ background: "#9d7bff", borderStyle: "dashed" }}
+            ></div>
+            <span>Cross-floor Path (via stairs)</span>
           </div>
           <div className="legend-item">
             <div
