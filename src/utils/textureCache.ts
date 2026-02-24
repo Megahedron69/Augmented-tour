@@ -62,6 +62,7 @@ class TextureCache {
       };
 
       img.onerror = (error) => {
+        console.error(error);
         reject(new Error(`Failed to load texture: ${imagePath}`));
       };
 
