@@ -10,9 +10,9 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #000;
+  color-scheme: dark light;
+  color: #141a2f;
+  background-color: #f4f7ff;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -29,27 +29,23 @@
 
 html {
   width: 100%;
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
   margin: 0;
   padding: 0;
   width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: #000;
+  min-height: 100%;
+  background: #f4f7ff;
 }
 
 html,
 body,
 #root {
   width: 100%;
-  height: 100%;
-  position: fixed;
-  top: 0;
-  left: 0;
+  min-height: 100%;
 }
 
 a {

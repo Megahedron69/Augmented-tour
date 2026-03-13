@@ -49,7 +49,7 @@
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 18px;
   padding: 24px 28px;
-  max-width: 350px;
+  max-width: 460px;
   z-index: 100;
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.3),
@@ -68,12 +68,49 @@
   text-shadow: 0 2px 8px rgba(0, 217, 255, 0.3);
 }
 
+.info-panel-header h3 {
+  flex: 1;
+  min-width: max-content;
+  margin: 0;
+  white-space: nowrap;
+  overflow: visible;
+}
+
 .info-panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.info-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.home-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.96);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.home-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.45);
 }
 
 .room-selector-btn {

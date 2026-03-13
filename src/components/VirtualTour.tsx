@@ -8,6 +8,7 @@ import {
   RotateCcw,
   Package,
   DoorOpen,
+  House,
   Map,
   MapPin,
   X,
@@ -36,7 +37,11 @@ import {
 import type { NavigationMarker } from "../types/navigationMarkers";
 import { addNavigationMarker } from "../utils/navigationMarkerStorage";
 
-const VirtualTour: React.FC = () => {
+interface VirtualTourProps {
+  onGoHome?: () => void;
+}
+
+const VirtualTour: React.FC<VirtualTourProps> = ({ onGoHome }) => {
   const [allPanos, setAllPanos] = useState<ParsedPano[]>([]);
   const [roomGroups, setRoomGroups] = useState<RoomGroup[]>([]);
   const [currentPano, setCurrentPano] = useState<ParsedPano | null>(null);
@@ -373,15 +378,29 @@ const VirtualTour: React.FC = () => {
             {currentPano.label.charAt(0).toUpperCase() +
               currentPano.label.slice(1)}
           </h3>
-          <motion.button
-            className="room-selector-btn"
-            onClick={() => setShowRoomSelector(!showRoomSelector)}
-            title="Select Room"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <MapPin size={18} />
-          </motion.button>
+          <div className="info-panel-actions">
+            {onGoHome && (
+              <motion.button
+                className="home-btn"
+                onClick={onGoHome}
+                title="Back to Home"
+                aria-label="Back to Home"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <House size={16} />
+              </motion.button>
+            )}
+            <motion.button
+              className="room-selector-btn"
+              onClick={() => setShowRoomSelector(!showRoomSelector)}
+              title="Select Room"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <MapPin size={18} />
+            </motion.button>
+          </div>
         </div>
         <p className="pano-info">
           Floor {currentPano.floorNumber} • Camera Height:{" "}
