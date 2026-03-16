@@ -4,8 +4,12 @@ import { OrbitControls, useGLTF, useTexture } from "@react-three/drei";
 import {
   Box3,
   DoubleSide,
+  RepeatWrapping,
+  SRGBColorSpace,
   Shape,
   ShapeGeometry,
+  Texture,
+  TextureLoader,
   Vector2,
   Vector3,
 } from "three";
@@ -58,9 +62,17 @@ type DoorBox = {
   centerY: number;
   width: number;
   depth: number;
+  rotationY: number;
 };
 
 type Segment = { from: Point2D; to: Point2D };
+
+type RoomEdge = {
+  roomIndex: number;
+  from: Point2D;
+  to: Point2D;
+  length: number;
+};
 
 type Vec3 = [number, number, number];
 
@@ -183,6 +195,29 @@ const normalizeVectorUnits = (vector: Vec3): Vec3 => {
 
 const clampNumber = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));
+};
+
+const toSharedEdgeKey = (from: Point2D, to: Point2D): string => {
+  const round = (value: number) => Number(value.toFixed(1));
+  const ax = round(from.x);
+  const ay = round(from.y);
+  const bx = round(to.x);
+  const by = round(to.y);
+
+  const keyAB = `${ax},${ay}|${bx},${by}`;
+  const keyBA = `${bx},${by}|${ax},${ay}`;
+
+  return keyAB < keyBA ? keyAB : keyBA;
+};
+
+const getRoomIndexForPoint = (point: Point2D, rooms: Point2D[][]): number => {
+  for (let index = 0; index < rooms.length; index += 1) {
+    if (isPointInPolygon(point, rooms[index])) {
+      return index;
+    }
+  }
+
+  return -1;
 };
 
 const isPointInPolygon = (point: Point2D, polygon: Point2D[]): boolean => {
@@ -538,6 +573,7 @@ const normalizeGeometry = (
   wallThickness: number,
 ): { walls: WallBox[]; doors: DoorBox[]; rooms: Point2D[][] } => {
   const wallSegments: Segment[] = [];
+  const roomEdges: RoomEdge[] = [];
   const doors: DoorBox[] = [];
   const rooms: Point2D[][] = [];
 
@@ -564,22 +600,7 @@ const normalizeGeometry = (
     }
   }
 
-  for (const door of data.doors ?? []) {
-    const bbox = toBBox(door);
-    if (!bbox) {
-      continue;
-    }
-
-    const [x1, y1, x2, y2] = bbox;
-    doors.push({
-      centerX: (x1 + x2) / 2,
-      centerY: (y1 + y2) / 2,
-      width: Math.max(Math.abs(x2 - x1), wallThickness * 0.8),
-      depth: Math.max(Math.abs(y2 - y1), wallThickness * 0.8),
-    });
-  }
-
-  for (const room of data.rooms ?? []) {
+  for (const [roomIndex, room] of (data.rooms ?? []).entries()) {
     const polygon = toPolygon(room);
     if (polygon.length >= 3) {
       rooms.push(polygon);
@@ -588,6 +609,16 @@ const normalizeGeometry = (
         const from = polygon[index];
         const to = polygon[(index + 1) % polygon.length];
         addSegment(from, to);
+
+        const length = Math.hypot(to.x - from.x, to.y - from.y);
+        if (length > 0.0001) {
+          roomEdges.push({
+            roomIndex,
+            from,
+            to,
+            length,
+          });
+        }
       }
     }
   }
@@ -612,11 +643,153 @@ const normalizeGeometry = (
   }
 
   const walls: WallBox[] = [];
-  for (const segment of dedupedSegmentMap.values()) {
+  const dedupedSegments = Array.from(dedupedSegmentMap.values());
+
+  for (const segment of dedupedSegments) {
     const box = segmentToBox(segment.from, segment.to, wallThickness);
     if (box) {
       walls.push(box);
     }
+  }
+
+  const bestDoorByRoomPair = new Map<string, DoorBox & { overlap: number }>();
+  const doorDepth = clampNumber(
+    wallThickness * 0.96,
+    wallThickness * 0.85,
+    wallThickness,
+  );
+
+  const sharedEdgeBuckets = new Map<string, RoomEdge[]>();
+  for (const edge of roomEdges) {
+    const key = toSharedEdgeKey(edge.from, edge.to);
+    const bucket = sharedEdgeBuckets.get(key);
+    if (bucket) {
+      bucket.push(edge);
+    } else {
+      sharedEdgeBuckets.set(key, [edge]);
+    }
+  }
+
+  for (const edges of sharedEdgeBuckets.values()) {
+    if (edges.length < 2) {
+      continue;
+    }
+
+    for (let i = 0; i < edges.length; i += 1) {
+      const first = edges[i];
+      for (let j = i + 1; j < edges.length; j += 1) {
+        const second = edges[j];
+        if (first.roomIndex === second.roomIndex) {
+          continue;
+        }
+
+        const dx = first.to.x - first.from.x;
+        const dy = first.to.y - first.from.y;
+        const length = Math.hypot(dx, dy);
+        if (length <= 0.0001) {
+          continue;
+        }
+
+        const roomA = Math.min(first.roomIndex, second.roomIndex);
+        const roomB = Math.max(first.roomIndex, second.roomIndex);
+        const roomPairKey = `${roomA}|${roomB}`;
+
+        const width = clampNumber(
+          length * 0.4,
+          Math.max(wallThickness * 1.2, 1.2),
+          Math.max(wallThickness * 8, 2),
+        );
+
+        const candidate: DoorBox & { overlap: number } = {
+          centerX: (first.from.x + first.to.x) / 2,
+          centerY: (first.from.y + first.to.y) / 2,
+          width,
+          depth: doorDepth,
+          rotationY: Math.atan2(dy, dx),
+          overlap: length,
+        };
+
+        const existing = bestDoorByRoomPair.get(roomPairKey);
+        if (!existing || candidate.overlap > existing.overlap) {
+          bestDoorByRoomPair.set(roomPairKey, candidate);
+        }
+      }
+    }
+  }
+
+  // Fallback: infer connected-room walls by checking points on both sides
+  // of each wall segment. This catches inter-room boundaries that do not
+  // appear as perfectly duplicated polygon edges.
+  for (const segment of dedupedSegments) {
+    const dx = segment.to.x - segment.from.x;
+    const dy = segment.to.y - segment.from.y;
+    const length = Math.hypot(dx, dy);
+
+    if (length <= 0.0001) {
+      continue;
+    }
+
+    const mid: Point2D = {
+      x: (segment.from.x + segment.to.x) / 2,
+      y: (segment.from.y + segment.to.y) / 2,
+    };
+
+    const nx = -dy / length;
+    const ny = dx / length;
+    const sampleOffset = Math.max(wallThickness * 0.9, 3);
+
+    const a = getRoomIndexForPoint(
+      {
+        x: mid.x + nx * sampleOffset,
+        y: mid.y + ny * sampleOffset,
+      },
+      rooms,
+    );
+    const b = getRoomIndexForPoint(
+      {
+        x: mid.x - nx * sampleOffset,
+        y: mid.y - ny * sampleOffset,
+      },
+      rooms,
+    );
+
+    if (a < 0 || b < 0 || a === b) {
+      continue;
+    }
+
+    const roomA = Math.min(a, b);
+    const roomB = Math.max(a, b);
+    const roomPairKey = `${roomA}|${roomB}`;
+
+    const width = clampNumber(
+      length * 0.34,
+      Math.max(wallThickness * 1.2, 1.2),
+      Math.max(wallThickness * 5.2, 2),
+    );
+
+    const candidate: DoorBox & { overlap: number } = {
+      centerX: mid.x,
+      centerY: mid.y,
+      width,
+      depth: doorDepth,
+      rotationY: Math.atan2(dy, dx),
+      overlap: length,
+    };
+
+    const existing = bestDoorByRoomPair.get(roomPairKey);
+    if (!existing || candidate.overlap > existing.overlap) {
+      bestDoorByRoomPair.set(roomPairKey, candidate);
+    }
+  }
+
+  for (const candidate of bestDoorByRoomPair.values()) {
+    doors.push({
+      centerX: candidate.centerX,
+      centerY: candidate.centerY,
+      width: candidate.width,
+      depth: candidate.depth,
+      rotationY: candidate.rotationY,
+    });
   }
 
   return { walls, doors, rooms };
@@ -638,7 +811,106 @@ const FloorPlan3DPreview = ({
 }: FloorPlan3DPreviewProps) => {
   const [hoveredRoomIndex, setHoveredRoomIndex] = useState<number | null>(null);
   const [isTopView, setIsTopView] = useState(true);
+  const [surfaceTextures, setSurfaceTextures] = useState<{
+    floor: Texture;
+    floorNormal: Texture;
+    floorRoughness: Texture;
+    wallBase: Texture;
+    wallNormal: Texture;
+    wallRoughness: Texture;
+    door: Texture;
+  } | null>(null);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    const loader = new TextureLoader();
+
+    const loadTexture = (url: string) =>
+      new Promise<Texture>((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject);
+      });
+
+    const configureTexture = (
+      texture: Texture,
+      repeatX: number,
+      repeatY: number,
+      withSrgb = false,
+    ) => {
+      texture.wrapS = RepeatWrapping;
+      texture.wrapT = RepeatWrapping;
+      texture.repeat.set(repeatX, repeatY);
+      if (withSrgb) {
+        texture.colorSpace = SRGBColorSpace;
+      }
+      texture.anisotropy = 8;
+      texture.needsUpdate = true;
+      return texture;
+    };
+
+    (async () => {
+      try {
+        const [
+          floor,
+          floorNormal,
+          floorRoughness,
+          wallBase,
+          wallNormal,
+          wallRoughness,
+          door,
+        ] = await Promise.all([
+          loadTexture(
+            "/textures/floor_textures2/1K/Poliigon_WoodVeneerOak_7760_BaseColor.jpg",
+          ),
+          loadTexture(
+            "/textures/floor_textures2/1K/Poliigon_WoodVeneerOak_7760_Normal.png",
+          ),
+          loadTexture(
+            "/textures/floor_textures2/1K/Poliigon_WoodVeneerOak_7760_Roughness.jpg",
+          ),
+          loadTexture(
+            "/textures/wall_textures/512/Poliigon_PlasterPainted_7664_BaseColor.jpg",
+          ),
+          loadTexture(
+            "/textures/wall_textures/512/Poliigon_PlasterPainted_7664_Normal.png",
+          ),
+          loadTexture(
+            "/textures/wall_textures/512/Poliigon_PlasterPainted_7664_Roughness.jpg",
+          ),
+          loadTexture(
+            "/textures/door_textures/10057_wooden_door_v1_diffuse.jpg",
+          ),
+        ]);
+
+        if (disposed) {
+          floor.dispose();
+          floorNormal.dispose();
+          floorRoughness.dispose();
+          wallBase.dispose();
+          wallNormal.dispose();
+          wallRoughness.dispose();
+          door.dispose();
+          return;
+        }
+
+        setSurfaceTextures({
+          floor: configureTexture(floor, 6, 6, true),
+          floorNormal: configureTexture(floorNormal, 6, 6),
+          floorRoughness: configureTexture(floorRoughness, 6, 6),
+          wallBase: configureTexture(wallBase, 4, 2, true),
+          wallNormal: configureTexture(wallNormal, 4, 2),
+          wallRoughness: configureTexture(wallRoughness, 4, 2),
+          door: configureTexture(door, 1, 1, true),
+        });
+      } catch (error) {
+        console.error("[FloorPlan3DPreview] Failed to load textures", error);
+      }
+    })();
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (hoveredRoomIndex === null) {
@@ -853,6 +1125,30 @@ const FloorPlan3DPreview = ({
 
         {geometry.roomShapes.map((shape, index) => (
           <group key={`room-${index}`}>
+            <mesh
+              rotation={[-Math.PI / 2, 0, 0]}
+              position={[
+                -center.x * unitScale * ROOM_SPACING_FACTOR,
+                0.01,
+                -center.y * unitScale * ROOM_SPACING_FACTOR,
+              ]}
+              scale={[
+                unitScale * ROOM_SPACING_FACTOR,
+                unitScale * ROOM_SPACING_FACTOR,
+                unitScale * ROOM_SPACING_FACTOR,
+              ]}
+            >
+              <shapeGeometry args={[shape]} />
+              <meshStandardMaterial
+                map={surfaceTextures?.floor}
+                normalMap={surfaceTextures?.floorNormal}
+                roughnessMap={surfaceTextures?.floorRoughness}
+                roughness={0.8}
+                metalness={0.02}
+                side={DoubleSide}
+              />
+            </mesh>
+
             {(() => {
               const overlayColor =
                 ROOM_OVERLAY_COLORS[index % ROOM_OVERLAY_COLORS.length];
@@ -986,7 +1282,13 @@ const FloorPlan3DPreview = ({
                 wall.depth * unitScale * ROOM_SPACING_FACTOR,
               ]}
             />
-            <meshStandardMaterial color="#d3cec4" roughness={0.92} />
+            <meshStandardMaterial
+              map={surfaceTextures?.wallBase}
+              normalMap={surfaceTextures?.wallNormal}
+              roughnessMap={surfaceTextures?.wallRoughness}
+              roughness={0.88}
+              metalness={0.03}
+            />
           </mesh>
         ))}
 
@@ -998,6 +1300,7 @@ const FloorPlan3DPreview = ({
               1,
               (door.centerY - center.y) * unitScale * ROOM_SPACING_FACTOR,
             ]}
+            rotation={[0, -door.rotationY, 0]}
           >
             <boxGeometry
               args={[
@@ -1006,7 +1309,14 @@ const FloorPlan3DPreview = ({
                 door.depth * unitScale * ROOM_SPACING_FACTOR,
               ]}
             />
-            <meshStandardMaterial color="#b4762f" roughness={0.82} />
+            <meshStandardMaterial
+              map={surfaceTextures?.door}
+              roughness={0.82}
+              metalness={0.02}
+              polygonOffset
+              polygonOffsetFactor={-2}
+              polygonOffsetUnits={-2}
+            />
           </mesh>
         ))}
 
