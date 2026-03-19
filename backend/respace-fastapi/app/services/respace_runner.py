@@ -13,7 +13,8 @@ class RespaceRunner:
         self.mode = "mock"
         self.max_attempts = 3
         self.n_bon_sgllm = 2
-        self.max_added_objects = 2
+        self.min_added_objects = 1
+        self.max_added_objects = 8
 
     def _get_max_attempts(self) -> int:
         raw_value = os.getenv("RESPACE_MAX_ATTEMPTS", str(self.max_attempts)).strip()
@@ -41,9 +42,33 @@ class RespaceRunner:
             return self.max_added_objects
         return max(1, parsed)
 
+    def _get_min_added_objects(self) -> int:
+        raw_value = os.getenv(
+            "RESPACE_MIN_ADDED_OBJECTS", str(self.min_added_objects)
+        ).strip()
+        try:
+            parsed = int(raw_value)
+        except ValueError:
+            return self.min_added_objects
+        return max(1, parsed)
+
     def _build_prompt_with_limits(self, prompt: str) -> str:
+        min_objects = self._get_min_added_objects()
         max_objects = self._get_max_added_objects()
-        return f"{prompt.strip()} Keep it minimal and add at most {max_objects} furniture items total."
+        min_objects = min(min_objects, max_objects)
+        layout_constraints = (
+            "Place objects with comfortable spacing and never overlap footprints. "
+            "Preserve circulation and door clearances. "
+            "Maintain approximately 0.35m minimum spacing between typical items and "
+            "around 0.6m between large furniture pieces. "
+            "Orient seating and tables toward functional focal points while keeping "
+            "wall-anchored furniture aligned with nearby walls."
+        )
+        return (
+            f"{prompt.strip()} "
+            f"Add between {min_objects} and {max_objects} furniture items total. "
+            f"{layout_constraints}"
+        )
 
     def _get_asset_resample_attempts(self) -> int:
         raw_value = os.getenv("RESPACE_ASSET_RESAMPLE_ATTEMPTS", "3").strip()
@@ -150,6 +175,127 @@ class RespaceRunner:
             area += (x1 * y2) - (x2 * y1)
         return abs(area) / 2.0
 
+    def _polygon_signed_area(self, points: list[tuple[float, float]]) -> float:
+        if len(points) < 3:
+            return 0.0
+
+        area = 0.0
+        for index in range(len(points)):
+            x1, y1 = points[index]
+            x2, y2 = points[(index + 1) % len(points)]
+            area += (x1 * y2) - (x2 * y1)
+        return area / 2.0
+
+    def _orientation(
+        self,
+        a: tuple[float, float],
+        b: tuple[float, float],
+        c: tuple[float, float],
+    ) -> int:
+        value = ((b[1] - a[1]) * (c[0] - b[0])) - ((b[0] - a[0]) * (c[1] - b[1]))
+        eps = 1e-9
+        if abs(value) <= eps:
+            return 0
+        return 1 if value > 0 else 2
+
+    def _on_segment(
+        self,
+        a: tuple[float, float],
+        b: tuple[float, float],
+        c: tuple[float, float],
+    ) -> bool:
+        eps = 1e-9
+        return (
+            min(a[0], c[0]) - eps <= b[0] <= max(a[0], c[0]) + eps
+            and min(a[1], c[1]) - eps <= b[1] <= max(a[1], c[1]) + eps
+        )
+
+    def _segments_intersect(
+        self,
+        p1: tuple[float, float],
+        p2: tuple[float, float],
+        q1: tuple[float, float],
+        q2: tuple[float, float],
+    ) -> bool:
+        o1 = self._orientation(p1, p2, q1)
+        o2 = self._orientation(p1, p2, q2)
+        o3 = self._orientation(q1, q2, p1)
+        o4 = self._orientation(q1, q2, p2)
+
+        if o1 != o2 and o3 != o4:
+            return True
+
+        if o1 == 0 and self._on_segment(p1, q1, p2):
+            return True
+        if o2 == 0 and self._on_segment(p1, q2, p2):
+            return True
+        if o3 == 0 and self._on_segment(q1, p1, q2):
+            return True
+        if o4 == 0 and self._on_segment(q1, p2, q2):
+            return True
+
+        return False
+
+    def _is_simple_polygon(self, points: list[tuple[float, float]]) -> bool:
+        n = len(points)
+        if n < 3:
+            return False
+
+        for i in range(n):
+            a1 = points[i]
+            a2 = points[(i + 1) % n]
+
+            for j in range(i + 1, n):
+                # Adjacent edges share a vertex and are expected to touch.
+                if j == i or j == (i + 1) % n or (i == 0 and j == n - 1):
+                    continue
+
+                b1 = points[j]
+                b2 = points[(j + 1) % n]
+
+                if self._segments_intersect(a1, a2, b1, b2):
+                    return False
+
+        return True
+
+    def _remove_collinear_points(
+        self, points: list[tuple[float, float]]
+    ) -> list[tuple[float, float]]:
+        if len(points) < 3:
+            return points
+
+        cleaned: list[tuple[float, float]] = []
+        n = len(points)
+        eps = 1e-9
+
+        for index in range(n):
+            prev = points[(index - 1) % n]
+            current = points[index]
+            nxt = points[(index + 1) % n]
+
+            cross = ((current[0] - prev[0]) * (nxt[1] - current[1])) - (
+                (current[1] - prev[1]) * (nxt[0] - current[0])
+            )
+
+            if abs(cross) <= eps:
+                continue
+
+            cleaned.append(current)
+
+        return cleaned
+
+    def _round_points(
+        self, points: list[tuple[float, float]]
+    ) -> list[tuple[float, float]]:
+        return [(round(x, 4), round(y, 4)) for x, y in points]
+
+    def _normalize_polygon_order(
+        self, points: list[tuple[float, float]]
+    ) -> list[tuple[float, float]]:
+        if self._polygon_signed_area(points) < 0:
+            return list(reversed(points))
+        return points
+
     def _convex_hull(
         self, points: list[tuple[float, float]]
     ) -> list[tuple[float, float]]:
@@ -187,8 +333,10 @@ class RespaceRunner:
         if len(points) < 3:
             return []
 
+        rounded = self._round_points(points)
+
         deduped: list[tuple[float, float]] = []
-        for point in points:
+        for point in rounded:
             if not deduped or deduped[-1] != point:
                 deduped.append(point)
 
@@ -198,10 +346,30 @@ class RespaceRunner:
         if len(deduped) < 3:
             return []
 
-        if self._polygon_area(deduped) > 0:
-            return deduped
+        deduped = self._remove_collinear_points(deduped)
+        if len(deduped) < 3:
+            return []
 
-        return self._convex_hull(deduped)
+        if self._polygon_area(deduped) <= 1e-8:
+            return []
+
+        if not self._is_simple_polygon(deduped):
+            return self._convex_hull(deduped)
+
+        return self._normalize_polygon_order(deduped)
+
+    def _build_valid_polygon(
+        self, points: list[tuple[float, float]]
+    ) -> list[tuple[float, float]]:
+        sanitized = self._sanitize_polygon(points)
+        if len(sanitized) >= 3 and self._polygon_area(sanitized) > 1e-8:
+            return sanitized
+
+        hull = self._convex_hull(points)
+        if len(hull) >= 3 and self._polygon_area(hull) > 1e-8:
+            return self._normalize_polygon_order(hull)
+
+        return []
 
     def _extract_room_polygon(
         self, geometry: dict[str, Any]
@@ -217,7 +385,7 @@ class RespaceRunner:
             points = self._to_points(room)
             all_points.extend(points)
 
-            sanitized = self._sanitize_polygon(points)
+            sanitized = self._build_valid_polygon(points)
             area = self._polygon_area(sanitized)
             if area > best_area:
                 best = sanitized
@@ -226,20 +394,44 @@ class RespaceRunner:
         if len(best) >= 3:
             return best
 
-        return self._convex_hull(all_points)
+        return self._build_valid_polygon(all_points)
 
-    def _geometry_to_ssr_scene(self, geometry: dict[str, Any]) -> dict[str, Any]:
+    def _geometry_to_ssr_scene(
+        self,
+        geometry: dict[str, Any],
+        unit_scale: float = 0.01,
+        wall_height: float = 3.0,
+        room_name: str = "",
+    ) -> dict[str, Any]:
         polygon = self._extract_room_polygon(geometry)
 
         if len(polygon) < 3:
             polygon = [(0.0, 0.0), (5.0, 0.0), (5.0, 4.0), (0.0, 4.0)]
 
-        unit_scale = 0.01
         bounds_top = [[x * unit_scale, 0.0, y * unit_scale] for x, y in polygon]
-        bounds_bottom = [[x * unit_scale, -3.0, y * unit_scale] for x, y in polygon]
+        bounds_bottom = [
+            [x * unit_scale, -wall_height, y * unit_scale] for x, y in polygon
+        ]
+
+        # Map room name to a recognised SSR room_type; fall back to "bedroom".
+        name_lower = room_name.strip().lower()
+        if any(k in name_lower for k in ("living", "lounge", "sitting")):
+            room_type = "living_room"
+        elif any(k in name_lower for k in ("kitchen",)):
+            room_type = "kitchen"
+        elif any(k in name_lower for k in ("dining",)):
+            room_type = "dining_room"
+        elif any(k in name_lower for k in ("office", "study", "work")):
+            room_type = "office"
+        elif any(k in name_lower for k in ("bath", "toilet", "wc")):
+            room_type = "bathroom"
+        elif any(k in name_lower for k in ("bed", "master", "guest")):
+            room_type = "bedroom"
+        else:
+            room_type = "bedroom"
 
         return {
-            "room_type": "bedroom",
+            "room_type": room_type,
             "bounds_top": bounds_top,
             "bounds_bottom": bounds_bottom,
             "objects": [],
@@ -304,10 +496,22 @@ class RespaceRunner:
 
         self.mode = "real"
 
-    def run(self, geometry: dict[str, Any], prompt: str) -> dict[str, Any]:
+    def run(
+        self,
+        geometry: dict[str, Any],
+        prompt: str,
+        unit_scale: float = 0.01,
+        wall_height: float = 3.0,
+        room_name: str = "",
+    ) -> dict[str, Any]:
         self._load_real_respace()
 
-        scene = self._geometry_to_ssr_scene(geometry)
+        scene = self._geometry_to_ssr_scene(
+            geometry,
+            unit_scale=unit_scale,
+            wall_height=wall_height,
+            room_name=room_name,
+        )
         start_time = time.perf_counter()
 
         if self._respace is None:

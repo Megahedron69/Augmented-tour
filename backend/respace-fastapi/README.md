@@ -145,3 +145,8 @@ Payload shape (example):
 - `real` mode calls `ReSpace().handle_prompt(...)` through the wrapper.
 - For high-quality full scenes, complete all official asset + preprocessing steps first.
 - If requests feel stuck, reduce `RESPACE_MAX_ATTEMPTS` (for example `1` or `2`) to fail fast when the model does not produce valid commands.
+
+## Start backend
+
+- source .venv/bin/activate
+- uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

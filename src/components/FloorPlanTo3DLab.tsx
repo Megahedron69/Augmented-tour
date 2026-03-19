@@ -19,6 +19,7 @@ import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import FloorPlan3DPreview, {
   type ManualAssetCatalogItem,
   type ManualPlacedObject,
+  type RespaceObjectOverride,
 } from "./FloorPlan3DPreview";
 import "./FloorPlanTo3DLab.css";
 
@@ -57,6 +58,8 @@ interface AssetCatalogResponse {
 }
 
 type Point2D = { x: number; y: number };
+
+type Vec3 = [number, number, number];
 
 interface LabelableRoom {
   points: Point2D[];
@@ -100,6 +103,21 @@ const ROOM_ASSET_PRESETS: Array<{ pattern: RegExp; assets: string[] }> = [
     pattern: /(office|study)/i,
     assets: ["desk", "task chair", "bookshelf"],
   },
+];
+
+const GLOBAL_FALLBACK_ASSETS = [
+  "accent chair",
+  "area rug",
+  "ceiling light",
+  "side table",
+  "wall art",
+  "floor lamp",
+  "console table",
+  "bookcase",
+  "plant",
+  "ottoman",
+  "mirror",
+  "storage cabinet",
 ];
 
 const asNumber = (value: unknown): number | null => {
@@ -183,6 +201,131 @@ const getCentroid = (points: Point2D[]): Point2D => {
   };
 };
 
+const tryVec3 = (value: unknown): Vec3 | null => {
+  if (Array.isArray(value) && value.length >= 3) {
+    const x = asNumber(value[0]);
+    const y = asNumber(value[1]);
+    const z = asNumber(value[2]);
+    if (x !== null && y !== null && z !== null) {
+      return [x, y, z];
+    }
+  }
+
+  if (value && typeof value === "object") {
+    const candidate = value as { x?: unknown; y?: unknown; z?: unknown };
+    const x = asNumber(candidate.x);
+    const y = asNumber(candidate.y);
+    const z = asNumber(candidate.z);
+    if (x !== null && y !== null && z !== null) {
+      return [x, y, z];
+    }
+  }
+
+  return null;
+};
+
+const getSceneRoomCentroid = (
+  scene: unknown,
+): { x: number; z: number } | null => {
+  if (!scene || typeof scene !== "object") {
+    return null;
+  }
+
+  const boundsTop = (scene as { bounds_top?: unknown }).bounds_top;
+  if (!Array.isArray(boundsTop) || boundsTop.length < 3) {
+    return null;
+  }
+
+  const points = boundsTop
+    .map((item) => tryVec3(item))
+    .filter((point): point is Vec3 => !!point);
+
+  if (points.length < 3) {
+    return null;
+  }
+
+  const sum = points.reduce(
+    (acc, point) => ({ x: acc.x + point[0], z: acc.z + point[2] }),
+    { x: 0, z: 0 },
+  );
+
+  return {
+    x: sum.x / points.length,
+    z: sum.z / points.length,
+  };
+};
+
+const remapRespaceObjectToRoom = (
+  objectValue: unknown,
+  roomIndex: number,
+  offsetX: number,
+  offsetZ: number,
+  runTag?: string,
+  objectIndex = 0,
+): unknown => {
+  if (!objectValue || typeof objectValue !== "object") {
+    return objectValue;
+  }
+
+  const source = objectValue as Record<string, unknown>;
+  const mapped: Record<string, unknown> = {
+    ...source,
+    __fp3dRoomIndex: roomIndex,
+  };
+
+  if (runTag) {
+    const baseId =
+      (typeof source.id === "string" && source.id.trim()) ||
+      (typeof source.object_id === "string" && source.object_id.trim()) ||
+      `generated-${objectIndex + 1}`;
+    mapped.object_id = `${runTag}-${baseId}`;
+  }
+
+  for (const key of [
+    "position",
+    "pos",
+    "translation",
+    "location",
+    "center",
+    "centroid",
+  ]) {
+    const vector = tryVec3(source[key]);
+    if (vector) {
+      mapped[key] = [vector[0] + offsetX, vector[1], vector[2] + offsetZ];
+      break;
+    }
+  }
+
+  if (Array.isArray(source.bbox) && source.bbox.length >= 6) {
+    const x1 = asNumber(source.bbox[0]);
+    const y1 = asNumber(source.bbox[1]);
+    const z1 = asNumber(source.bbox[2]);
+    const x2 = asNumber(source.bbox[3]);
+    const y2 = asNumber(source.bbox[4]);
+    const z2 = asNumber(source.bbox[5]);
+
+    if (
+      x1 !== null &&
+      y1 !== null &&
+      z1 !== null &&
+      x2 !== null &&
+      y2 !== null &&
+      z2 !== null
+    ) {
+      mapped.bbox = [
+        x1 + offsetX,
+        y1,
+        z1 + offsetZ,
+        x2 + offsetX,
+        y2,
+        z2 + offsetZ,
+      ];
+    }
+  }
+
+  return mapped;
+};
+
 const getAssetsForRoom = (roomName: string): string[] => {
   const matchedPreset = ROOM_ASSET_PRESETS.find((preset) =>
     preset.pattern.test(roomName),
@@ -192,26 +335,56 @@ const getAssetsForRoom = (roomName: string): string[] => {
     return matchedPreset.assets;
   }
 
-  return ["accent chair", "area rug", "ceiling light"];
+  return GLOBAL_FALLBACK_ASSETS.slice(0, 3);
+};
+
+const dedupeAssetLabels = (assets: string[]): string[] => {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+
+  for (const rawAsset of assets) {
+    const normalized = rawAsset.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    unique.push(rawAsset.trim());
+  }
+
+  return unique;
+};
+
+const buildAssetListForPrompt = (
+  roomName: string,
+  requestedAssetCount: number,
+): string[] => {
+  const desiredCount = Math.max(1, requestedAssetCount);
+  const baseAssets = getAssetsForRoom(roomName);
+  const uniquePool = dedupeAssetLabels([
+    ...baseAssets,
+    ...GLOBAL_FALLBACK_ASSETS,
+  ]);
+
+  if (uniquePool.length >= desiredCount) {
+    return uniquePool.slice(0, desiredCount);
+  }
+
+  const extended = [...uniquePool];
+  for (let index = uniquePool.length; index < desiredCount; index += 1) {
+    extended.push(`decor accent ${index - uniquePool.length + 1}`);
+  }
+
+  return extended;
 };
 
 const buildDefaultRespacePrompt = (
   roomName: string,
   requestedAssetCount: number,
 ): string => {
-  const baseAssets = getAssetsForRoom(roomName);
-  const fallbackAssets = [
-    "accent chair",
-    "area rug",
-    "ceiling light",
-    "side table",
-    "wall art",
-  ];
+  const assetCount = Math.max(1, requestedAssetCount);
+  const assets = buildAssetListForPrompt(roomName, assetCount);
 
-  const assetCount = Math.max(3, requestedAssetCount);
-  const assets = [...baseAssets, ...fallbackAssets].slice(0, assetCount);
-
-  return `Construct ${roomName} with a functional, realistic layout while preserving circulation and door clearances. Include at least ${assetCount} assets: ${assets.join(", ")}.`;
+  return `Construct ${roomName} with a functional, realistic layout while preserving circulation and door clearances. Include at least ${assetCount} unique assets: ${assets.join(", ")}. Keep furniture comfortably spaced with no overlap, maintain clear walkways, and orient seating toward the room center while keeping wall-anchored pieces aligned to walls.`;
 };
 
 const deriveApiBaseUrl = (respaceRunUrl: string): string => {
@@ -253,6 +426,7 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
   const [unitScale, setUnitScale] = useState(0.01);
   const [controlsCollapsed, setControlsCollapsed] = useState(true);
   const [roomNames, setRoomNames] = useState<string[]>([]);
+  const [roomAssetCounts, setRoomAssetCounts] = useState<number[]>([]);
   const [hoveredRoomIndex, setHoveredRoomIndex] = useState<number | null>(null);
   const [roomRunStates, setRoomRunStates] = useState<RunState[]>([]);
   const [respaceRoomObjects, setRespaceRoomObjects] = useState<
@@ -263,7 +437,7 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
     number | null
   >(null);
   const [roomDialogName, setRoomDialogName] = useState("");
-  const [roomDialogAssetCount, setRoomDialogAssetCount] = useState(3);
+  const [roomDialogAssetCount, setRoomDialogAssetCount] = useState(1);
   const [assetsSidebarCollapsed, setAssetsSidebarCollapsed] = useState(false);
   const [assetCatalogPage, setAssetCatalogPage] = useState(1);
   const [assetCatalogHasMore, setAssetCatalogHasMore] = useState(false);
@@ -280,6 +454,17 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
   const [selectedManualObjectId, setSelectedManualObjectId] = useState<
     string | null
   >(null);
+  const [selectedRespaceObjectKey, setSelectedRespaceObjectKey] = useState<
+    string | null
+  >(null);
+  const [respaceObjectOverrides, setRespaceObjectOverrides] = useState<
+    Record<string, RespaceObjectOverride>
+  >({});
+  const [editDialogRoomIndex, setEditDialogRoomIndex] = useState<number | null>(
+    null,
+  );
+  const [editDialogAssetCount, setEditDialogAssetCount] = useState(1);
+  const [editDialogPrompt, setEditDialogPrompt] = useState("");
 
   const digitalizationEndpoint =
     (import.meta.env.VITE_RASTERSCAN_GRADIO_URL as string | undefined) ??
@@ -396,6 +581,7 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
       roomIndex: number,
       roomName: string,
       assetCount: number,
+      customPrompt?: string,
     ) => {
       if (!respaceEndpoint.trim()) {
         setRespaceState("idle");
@@ -419,7 +605,9 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
           return next;
         });
 
-        const prompt = buildDefaultRespacePrompt(roomName, assetCount);
+        const prompt =
+          customPrompt?.trim() ||
+          buildDefaultRespacePrompt(roomName, assetCount);
         const orderedValidRoomPolygons = (geometry.rooms ?? [])
           .map(toPolygon)
           .filter((polygon) => polygon.length >= 3);
@@ -491,14 +679,54 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
           result.message ||
             `${roomName} constructed successfully with ${objectCount} object${objectCount > 1 ? "s" : ""}.`,
         );
+        const targetRoomCentroid = selectedRoom
+          ? getCentroid(selectedRoom)
+          : null;
+        const targetRoomCentroidWorld = targetRoomCentroid
+          ? {
+              x: targetRoomCentroid.x * unitScale,
+              z: targetRoomCentroid.y * unitScale,
+            }
+          : null;
+        const sourceRoomCentroidWorld = getSceneRoomCentroid(result.scene);
+        const offsetX =
+          targetRoomCentroidWorld && sourceRoomCentroidWorld
+            ? targetRoomCentroidWorld.x - sourceRoomCentroidWorld.x
+            : 0;
+        const offsetZ =
+          targetRoomCentroidWorld && sourceRoomCentroidWorld
+            ? targetRoomCentroidWorld.z - sourceRoomCentroidWorld.z
+            : 0;
+
+        const runTag = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const remappedObjects = (result.scene?.objects ?? []).map(
+          (objectValue, objectIndex) =>
+            remapRespaceObjectToRoom(
+              objectValue,
+              roomIndex,
+              offsetX,
+              offsetZ,
+              runTag,
+              objectIndex,
+            ),
+        );
+
         setRespaceRoomObjects((current) => {
-          const remaining = current.filter(
-            (bundle) => bundle.roomIndex !== roomIndex,
+          const roomBundleIndex = current.findIndex(
+            (bundle) => bundle.roomIndex === roomIndex,
           );
-          return [
-            ...remaining,
-            { roomIndex, objects: result.scene?.objects ?? [] },
-          ];
+
+          if (roomBundleIndex < 0) {
+            return [...current, { roomIndex, objects: remappedObjects }];
+          }
+
+          const next = [...current];
+          const existingBundle = next[roomBundleIndex];
+          next[roomBundleIndex] = {
+            ...existingBundle,
+            objects: [...existingBundle.objects, ...remappedObjects],
+          };
+          return next;
         });
         setRoomRunStates((current) => {
           const next = [...current];
@@ -632,10 +860,11 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
   useEffect(() => {
     if (!labelableRooms.length) {
       setRoomNames([]);
+      setRoomAssetCounts([]);
       setRoomRunStates([]);
       setNamingDialogRoomIndex(null);
       setRoomDialogName("");
-      setRoomDialogAssetCount(3);
+      setRoomDialogAssetCount(1);
       return;
     }
 
@@ -650,6 +879,13 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
       );
     });
 
+    setRoomAssetCounts((current) =>
+      Array.from(
+        { length: labelableRooms.length },
+        (_, index) => current[index] ?? 1,
+      ),
+    );
+
     setRoomRunStates((current) =>
       Array.from(
         { length: labelableRooms.length },
@@ -662,17 +898,20 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
     (roomIndex: number) => {
       const existingRoomName = roomNames[roomIndex]?.trim() ?? "";
       if (existingRoomName) {
-        setRespaceMessage(
-          `${existingRoomName} is already named. Edit UI for named rooms can be added next.`,
+        const storedAssetCount = Math.max(1, roomAssetCounts[roomIndex] ?? 1);
+        setEditDialogRoomIndex(roomIndex);
+        setEditDialogAssetCount(storedAssetCount);
+        setEditDialogPrompt(
+          buildDefaultRespacePrompt(existingRoomName, storedAssetCount),
         );
         return;
       }
 
       setNamingDialogRoomIndex(roomIndex);
       setRoomDialogName("");
-      setRoomDialogAssetCount(3);
+      setRoomDialogAssetCount(1);
     },
-    [roomNames],
+    [roomAssetCounts, roomNames],
   );
 
   const submitRoomNamingDialog = useCallback(
@@ -686,11 +925,17 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
         return;
       }
 
-      const resolvedAssetCount = Math.max(3, roomDialogAssetCount);
+      const resolvedAssetCount = Math.max(1, roomDialogAssetCount);
 
       setRoomNames((current) => {
         const next = [...current];
         next[namingDialogRoomIndex] = trimmedName;
+        return next;
+      });
+
+      setRoomAssetCounts((current) => {
+        const next = [...current];
+        next[namingDialogRoomIndex] = resolvedAssetCount;
         return next;
       });
 
@@ -707,7 +952,7 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
 
       setNamingDialogRoomIndex(null);
       setRoomDialogName("");
-      setRoomDialogAssetCount(3);
+      setRoomDialogAssetCount(1);
     },
     [
       namingDialogRoomIndex,
@@ -721,14 +966,101 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
   const clearPlacedAssets = useCallback(() => {
     setSelectedManualAsset(null);
     setSelectedManualObjectId(null);
+    setSelectedRespaceObjectKey(null);
+    setRespaceObjectOverrides({});
     setManualObjects([]);
     setRespaceRoomObjects([]);
     setRespaceMessage("Cleared placed assets for this floorplan.");
   }, []);
 
+  const removeRespaceObjectsForRoom = useCallback((roomIndex: number) => {
+    setRespaceRoomObjects((current) =>
+      current.filter((bundle) => bundle.roomIndex !== roomIndex),
+    );
+    setSelectedRespaceObjectKey(null);
+  }, []);
+
+  const nudgeSelectedRespaceObject = useCallback(
+    (dxDelta: number, dzDelta: number) => {
+      setRespaceObjectOverrides((current) => {
+        if (!selectedRespaceObjectKey) return current;
+        const existing = current[selectedRespaceObjectKey] ?? {
+          dx: 0,
+          dz: 0,
+          dRotY: 0,
+          scaleFactor: 1,
+        };
+        return {
+          ...current,
+          [selectedRespaceObjectKey]: {
+            ...existing,
+            dx: existing.dx + dxDelta,
+            dz: existing.dz + dzDelta,
+          },
+        };
+      });
+    },
+    [selectedRespaceObjectKey],
+  );
+
+  const rotateSelectedRespaceObject = useCallback(
+    (deltaRadians: number) => {
+      setRespaceObjectOverrides((current) => {
+        if (!selectedRespaceObjectKey) return current;
+        const existing = current[selectedRespaceObjectKey] ?? {
+          dx: 0,
+          dz: 0,
+          dRotY: 0,
+          scaleFactor: 1,
+        };
+        return {
+          ...current,
+          [selectedRespaceObjectKey]: {
+            ...existing,
+            dRotY: existing.dRotY + deltaRadians,
+          },
+        };
+      });
+    },
+    [selectedRespaceObjectKey],
+  );
+
+  const nudgeSelectedRespaceObjectScale = useCallback(
+    (delta: number) => {
+      setRespaceObjectOverrides((current) => {
+        if (!selectedRespaceObjectKey) return current;
+        const existing = current[selectedRespaceObjectKey] ?? {
+          dx: 0,
+          dz: 0,
+          dRotY: 0,
+          scaleFactor: 1,
+        };
+        return {
+          ...current,
+          [selectedRespaceObjectKey]: {
+            ...existing,
+            scaleFactor: Math.max(
+              0.2,
+              Math.min(2, existing.scaleFactor + delta),
+            ),
+          },
+        };
+      });
+    },
+    [selectedRespaceObjectKey],
+  );
+
   const activeConstructionCount = roomRunStates.filter(
     (state) => state === "running",
   ).length;
+
+  const runningRoomIndices = useMemo(
+    () =>
+      roomRunStates
+        .map((state, index) => (state === "running" ? index : -1))
+        .filter((index) => index >= 0),
+    [roomRunStates],
+  );
 
   const addManualObject = useCallback(
     (placement: {
@@ -901,7 +1233,71 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
         tag === "select" ||
         Boolean(target?.isContentEditable);
 
-      if (isTypingTarget || !selectedManualObjectId) {
+      if (isTypingTarget) {
+        return;
+      }
+
+      const moveStep = 0.08;
+
+      // ReSpace asset hotkeys
+      if (selectedRespaceObjectKey && !selectedManualObjectId) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          setSelectedRespaceObjectKey(null);
+          return;
+        }
+
+        if (event.shiftKey && event.key === "ArrowLeft") {
+          event.preventDefault();
+          rotateSelectedRespaceObject(-Math.PI / 12);
+          return;
+        }
+
+        if (event.shiftKey && event.key === "ArrowRight") {
+          event.preventDefault();
+          rotateSelectedRespaceObject(Math.PI / 12);
+          return;
+        }
+
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          nudgeSelectedRespaceObject(0, -moveStep);
+          return;
+        }
+
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          nudgeSelectedRespaceObject(0, moveStep);
+          return;
+        }
+
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          nudgeSelectedRespaceObject(-moveStep, 0);
+          return;
+        }
+
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          nudgeSelectedRespaceObject(moveStep, 0);
+          return;
+        }
+
+        if (event.key === "+" || event.key === "=" || event.key === "]") {
+          event.preventDefault();
+          nudgeSelectedRespaceObjectScale(0.08);
+          return;
+        }
+
+        if (event.key === "-" || event.key === "_" || event.key === "[") {
+          event.preventDefault();
+          nudgeSelectedRespaceObjectScale(-0.08);
+          return;
+        }
+      }
+
+      // Manual asset hotkeys
+      if (!selectedManualObjectId) {
         return;
       }
 
@@ -930,8 +1326,6 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
         rotateSelectedManualObject(Math.PI / 12);
         return;
       }
-
-      const moveStep = 0.08;
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
@@ -997,8 +1391,12 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
     manualObjects,
     moveManualObject,
     nudgeSelectedManualObjectScale,
+    nudgeSelectedRespaceObject,
+    nudgeSelectedRespaceObjectScale,
     rotateSelectedManualObject,
+    rotateSelectedRespaceObject,
     selectedManualObjectId,
+    selectedRespaceObjectKey,
   ]);
 
   const processUploadedFloorplan = async (file: File) => {
@@ -1017,6 +1415,8 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
       setRespaceMessage("");
       setSelectedManualAsset(null);
       setSelectedManualObjectId(null);
+      setSelectedRespaceObjectKey(null);
+      setRespaceObjectOverrides({});
       setManualObjects([]);
       setAssetCatalogPage(1);
 
@@ -1157,6 +1557,7 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
           wallThickness={wallThickness}
           unitScale={unitScale}
           roomNames={roomNames}
+          runningRoomIndices={runningRoomIndices}
           respaceObjects={respaceRoomObjects.flatMap(
             (bundle) => bundle.objects,
           )}
@@ -1165,9 +1566,16 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
           pendingAsset={selectedManualAsset}
           onPlaceManualObject={addManualObject}
           selectedManualObjectId={selectedManualObjectId}
-          onSelectManualObject={(objectId) =>
-            setSelectedManualObjectId(objectId)
-          }
+          onSelectManualObject={(objectId) => {
+            setSelectedManualObjectId(objectId);
+            if (objectId) setSelectedRespaceObjectKey(null);
+          }}
+          selectedRespaceObjectKey={selectedRespaceObjectKey}
+          respaceObjectOverrides={respaceObjectOverrides}
+          onSelectRespaceObject={(key) => {
+            setSelectedRespaceObjectKey(key);
+            if (key) setSelectedManualObjectId(null);
+          }}
         />
       </motion.main>
 
@@ -1361,6 +1769,13 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
                 </p>
               )}
 
+              {selectedRespaceObjectKey && (
+                <p className="fp3d-assets-selected">
+                  ReSpace asset selected. Arrow keys move, Shift+Left/Right
+                  rotate, +/- resize, Enter deselects.
+                </p>
+              )}
+
               {assetCatalogState === "running" && (
                 <p className="fp3d-assets-message">Loading assets...</p>
               )}
@@ -1451,12 +1866,26 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
               Number of assets
               <input
                 type="number"
-                min={2}
+                min={1}
                 max={8}
                 value={roomDialogAssetCount}
                 onChange={(event) =>
-                  setRoomDialogAssetCount(Number(event.target.value) || 3)
+                  setRoomDialogAssetCount(Number(event.target.value) || 1)
                 }
+              />
+            </label>
+
+            <label className="fp3d-room-dialog-field">
+              Default prompt (read-only preview)
+              <textarea
+                readOnly
+                className="fp3d-room-dialog-prompt-preview"
+                value={buildDefaultRespacePrompt(
+                  roomDialogName.trim() ||
+                    `Room ${(namingDialogRoomIndex ?? 0) + 1}`,
+                  roomDialogAssetCount,
+                )}
+                rows={3}
               />
             </label>
 
@@ -1487,6 +1916,112 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
         </div>
       )}
 
+      {editDialogRoomIndex !== null && (
+        <div className="fp3d-room-dialog-overlay">
+          <div className="fp3d-room-dialog">
+            <div className="fp3d-room-dialog-head">
+              <p>
+                {roomNames[editDialogRoomIndex]?.trim() ||
+                  `Room ${editDialogRoomIndex + 1}`}
+              </p>
+              <button
+                type="button"
+                onClick={() => setEditDialogRoomIndex(null)}
+                className="fp3d-room-dialog-close"
+                style={{ padding: 0 }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <label className="fp3d-room-dialog-field">
+              Prompt for ReSpace
+              <textarea
+                className="fp3d-room-dialog-prompt-edit"
+                value={editDialogPrompt}
+                rows={4}
+                onChange={(event) => setEditDialogPrompt(event.target.value)}
+              />
+            </label>
+
+            <label className="fp3d-room-dialog-field">
+              Target asset count
+              <input
+                type="number"
+                min={1}
+                max={12}
+                value={editDialogAssetCount}
+                onChange={(event) =>
+                  setEditDialogAssetCount(Number(event.target.value) || 1)
+                }
+              />
+            </label>
+
+            <button
+              type="button"
+              className="fp3d-room-dialog-submit fp3d-room-dialog-submit-secondary"
+              style={{ paddingBottom: "3px", paddingTop: "3px" }}
+              onClick={() => {
+                const roomName =
+                  roomNames[editDialogRoomIndex]?.trim() ||
+                  `Room ${editDialogRoomIndex + 1}`;
+                setEditDialogPrompt(
+                  buildDefaultRespacePrompt(roomName, editDialogAssetCount),
+                );
+              }}
+            >
+              Use Suggested Prompt
+            </button>
+
+            <p className="fp3d-room-dialog-note">
+              This named room supports add/remove with ReSpace. Edit prompt,
+              optionally adjust asset count, then add or remove assets.
+            </p>
+
+            <div className="fp3d-room-dialog-actions">
+              <button
+                type="button"
+                className="fp3d-room-dialog-submit fp3d-room-dialog-submit-danger"
+                style={{ paddingBottom: "3px", paddingTop: "3px" }}
+                onClick={() => {
+                  removeRespaceObjectsForRoom(editDialogRoomIndex);
+                  setEditDialogRoomIndex(null);
+                }}
+              >
+                Remove ReSpace Assets
+              </button>
+              <button
+                type="button"
+                className="fp3d-room-dialog-submit"
+                style={{ paddingBottom: "3px", paddingTop: "3px" }}
+                onClick={() => {
+                  if (!parsedData) return;
+                  const roomName =
+                    roomNames[editDialogRoomIndex]?.trim() ||
+                    `Room ${editDialogRoomIndex + 1}`;
+                  const resolvedAssetCount = Math.max(1, editDialogAssetCount);
+                  setRoomAssetCounts((current) => {
+                    const next = [...current];
+                    next[editDialogRoomIndex] = resolvedAssetCount;
+                    return next;
+                  });
+                  void runRespaceForRoom(
+                    parsedData,
+                    editDialogRoomIndex,
+                    roomName,
+                    resolvedAssetCount,
+                    editDialogPrompt,
+                  );
+                  setEditDialogRoomIndex(null);
+                }}
+              >
+                Add With ReSpace
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {digitalizationState === "running" && (
         <div className="fp3d-loading-overlay">
           <div className="fp3d-loading-card">
@@ -1502,18 +2037,13 @@ const FloorPlanTo3DLab = ({ onGoHome }: FloorPlanTo3DLabProps) => {
       )}
 
       {activeConstructionCount > 0 && (
-        <div className="fp3d-loading-overlay">
-          <div className="fp3d-loading-card">
-            <DotLottieReact
-              src="/loading.lottie"
-              autoplay
-              loop
-              className="fp3d-loading-lottie"
-            />
-            <p>
+        <div className="fp3d-top-right-actions" style={{ top: "66px" }}>
+          <div className="fp3d-status-pill">
+            <LoaderCircle size={14} className="spin" />
+            <span>
               Constructing {activeConstructionCount} room
-              {activeConstructionCount > 1 ? "s" : ""}... this can take a while
-            </p>
+              {activeConstructionCount > 1 ? "s" : ""}
+            </span>
           </div>
         </div>
       )}

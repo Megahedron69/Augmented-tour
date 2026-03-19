@@ -3,6 +3,7 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, useGLTF, useTexture } from "@react-three/drei";
 import {
   Box3,
+  CanvasTexture,
   DoubleSide,
   RepeatWrapping,
   SRGBColorSpace,
@@ -32,12 +33,20 @@ interface ParsedPlanData {
   rooms: unknown[];
 }
 
+export interface RespaceObjectOverride {
+  dx: number;
+  dz: number;
+  dRotY: number;
+  scaleFactor: number;
+}
+
 interface FloorPlan3DPreviewProps {
   data: ParsedPlanData | null;
   wallHeight: number;
   wallThickness: number;
   unitScale: number;
   roomNames?: string[];
+  runningRoomIndices?: number[];
   respaceObjects?: unknown[];
   onRoomClick?: (roomIndex: number) => void;
   manualObjects?: ManualPlacedObject[];
@@ -45,6 +54,9 @@ interface FloorPlan3DPreviewProps {
   onPlaceManualObject?: (placement: ManualPlacementRequest) => void;
   selectedManualObjectId?: string | null;
   onSelectManualObject?: (objectId: string | null) => void;
+  selectedRespaceObjectKey?: string | null;
+  respaceObjectOverrides?: Record<string, RespaceObjectOverride>;
+  onSelectRespaceObject?: (key: string | null) => void;
 }
 
 type Point2D = { x: number; y: number };
@@ -76,12 +88,35 @@ type RoomEdge = {
 
 type Vec3 = [number, number, number];
 
+type WorldPoint = { x: number; z: number };
+
+type RoomBounds = {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+};
+
+type DoorZone = {
+  x: number;
+  z: number;
+  radius: number;
+};
+
+interface ResolvedRenderablePlacement {
+  item: RenderableObject;
+  position: Vec3;
+  size: Vec3;
+  rotationY: number;
+}
+
 interface RenderableObject {
   key: string;
   position: Vec3;
   size: Vec3;
   rotationY: number;
   label: string;
+  roomIndex: number | null;
   textureUrl?: string;
   modelUrl?: string;
 }
@@ -119,6 +154,14 @@ export interface ManualPlacementRequest {
 }
 
 const ROOM_SPACING_FACTOR = 1.12;
+const FLOOR_PLANK_WORLD_SIZE = 2.5;
+const OBJECT_BASE_CLEARANCE = 0.14;
+const OBJECT_COMFORT_BUFFER = 0.28;
+const LARGE_OBJECT_SIZE_THRESHOLD = 1.2;
+const WALL_ANCHORED_LABEL_REGEX =
+  /(bed|sofa|couch|wardrobe|cabinet|desk|bookshelf|dresser|nightstand|tv|console)/i;
+const CENTER_FACING_LABEL_REGEX =
+  /(chair|sofa|couch|desk|table|bed|bench|stool)/i;
 
 const toFiniteNumber = (value: unknown, fallback = 0): number => {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -195,6 +238,71 @@ const normalizeVectorUnits = (vector: Vec3): Vec3 => {
 
 const clampNumber = (value: number, min: number, max: number): number => {
   return Math.min(max, Math.max(min, value));
+};
+
+const clampToBounds = (
+  point: WorldPoint,
+  bounds: RoomBounds | null,
+  size: Vec3,
+): WorldPoint => {
+  if (!bounds) {
+    return point;
+  }
+
+  return {
+    x: clampNumber(
+      point.x,
+      bounds.minX + size[0] / 2 + 0.06,
+      bounds.maxX - size[0] / 2 - 0.06,
+    ),
+    z: clampNumber(
+      point.z,
+      bounds.minZ + size[2] / 2 + 0.06,
+      bounds.maxZ - size[2] / 2 - 0.06,
+    ),
+  };
+};
+
+const getStableUnitVector = (seed: string): WorldPoint => {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+
+  const angle = ((hash % 360) * Math.PI) / 180;
+  return {
+    x: Math.cos(angle),
+    z: Math.sin(angle),
+  };
+};
+
+const projectPointToSegment = (
+  point: WorldPoint,
+  start: WorldPoint,
+  end: WorldPoint,
+): { point: WorldPoint; t: number; distance: number } => {
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+  const denom = dx * dx + dz * dz;
+
+  if (denom <= 1e-8) {
+    const distance = Math.hypot(point.x - start.x, point.z - start.z);
+    return { point: { x: start.x, z: start.z }, t: 0, distance };
+  }
+
+  const tUnclamped =
+    ((point.x - start.x) * dx + (point.z - start.z) * dz) / denom;
+  const t = clampNumber(tUnclamped, 0, 1);
+  const projected = {
+    x: start.x + dx * t,
+    z: start.z + dz * t,
+  };
+
+  return {
+    point: projected,
+    t,
+    distance: Math.hypot(point.x - projected.x, point.z - projected.z),
+  };
 };
 
 const toSharedEdgeKey = (from: Point2D, to: Point2D): string => {
@@ -339,6 +447,11 @@ const getRenderableObject = (objectValue: unknown): RenderableObject | null => {
     .map((value) => value.toFixed(3))
     .join("-")}-${normalizedSize.map((value) => value.toFixed(3)).join("-")}`;
 
+  const roomIndexRaw =
+    record.__fp3dRoomIndex ?? record.roomIndex ?? record.room_index ?? null;
+  const parsedRoomIndex = toFiniteNumber(roomIndexRaw, Number.NaN);
+  const roomIndex = Number.isInteger(parsedRoomIndex) ? parsedRoomIndex : null;
+
   return {
     key:
       objectId !== undefined && objectId !== null
@@ -352,6 +465,7 @@ const getRenderableObject = (objectValue: unknown): RenderableObject | null => {
       Math.max(0.35, Math.min(4, Math.abs(normalizedSize[2]))),
     ],
     rotationY,
+    roomIndex,
     textureUrl,
     modelUrl,
   };
@@ -801,6 +915,7 @@ const FloorPlan3DPreview = ({
   wallThickness,
   unitScale,
   roomNames = [],
+  runningRoomIndices = [],
   respaceObjects = [],
   onRoomClick,
   manualObjects = [],
@@ -808,15 +923,16 @@ const FloorPlan3DPreview = ({
   onPlaceManualObject,
   selectedManualObjectId = null,
   onSelectManualObject,
+  selectedRespaceObjectKey = null,
+  respaceObjectOverrides = {},
+  onSelectRespaceObject,
 }: FloorPlan3DPreviewProps) => {
   const [hoveredRoomIndex, setHoveredRoomIndex] = useState<number | null>(null);
   const [isTopView, setIsTopView] = useState(true);
   const [surfaceTextures, setSurfaceTextures] = useState<{
     floor: Texture;
-    floorNormal: Texture;
-    floorRoughness: Texture;
     wallBase: Texture;
-    wallNormal: Texture;
+    wallNormal?: Texture;
     wallRoughness: Texture;
     door: Texture;
   } | null>(null);
@@ -843,62 +959,113 @@ const FloorPlan3DPreview = ({
       if (withSrgb) {
         texture.colorSpace = SRGBColorSpace;
       }
-      texture.anisotropy = 8;
+      texture.anisotropy = 16;
+      texture.needsUpdate = true;
+      return texture;
+    };
+
+    const createFloorCanvasTexture = (baseTexture: Texture): CanvasTexture => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 2048;
+      canvas.height = 2048;
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        return new CanvasTexture(canvas);
+      }
+
+      ctx.fillStyle = "#9e6e42";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const baseImage = baseTexture.image as
+        | CanvasImageSource
+        | undefined
+        | null;
+      if (baseImage) {
+        const tileCanvas = document.createElement("canvas");
+        tileCanvas.width = 512;
+        tileCanvas.height = 512;
+        const tileCtx = tileCanvas.getContext("2d");
+        if (tileCtx) {
+          tileCtx.drawImage(baseImage, 0, 0, 512, 512);
+          const pattern = ctx.createPattern(tileCanvas, "repeat");
+          if (pattern) {
+            ctx.globalAlpha = 0.92;
+            ctx.fillStyle = pattern;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.globalAlpha = 1;
+          }
+        }
+      }
+
+      // Add plank seams and subtle tone shifts so floor detail remains visible from top view.
+      const plankPx = 120;
+      const rows = Math.ceil(canvas.height / plankPx);
+      for (let row = 0; row < rows; row += 1) {
+        const y = row * plankPx;
+        const tone = 0.88 + (row % 5) * 0.03;
+        ctx.fillStyle = `rgba(110, 70, 38, ${Math.min(0.22, tone * 0.18)})`;
+        ctx.fillRect(0, y, canvas.width, plankPx);
+
+        ctx.strokeStyle = "rgba(58, 34, 18, 0.34)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, y + plankPx - 1);
+        ctx.lineTo(canvas.width, y + plankPx - 1);
+        ctx.stroke();
+      }
+
+      for (let i = 0; i < 1800; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const len = 8 + Math.random() * 24;
+        ctx.strokeStyle =
+          Math.random() > 0.5
+            ? "rgba(88, 56, 30, 0.13)"
+            : "rgba(214, 176, 128, 0.09)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + len, y + Math.random() * 2 - 1);
+        ctx.stroke();
+      }
+
+      const texture = new CanvasTexture(canvas);
+      texture.colorSpace = SRGBColorSpace;
+      texture.wrapS = RepeatWrapping;
+      texture.wrapT = RepeatWrapping;
+      texture.anisotropy = 16;
       texture.needsUpdate = true;
       return texture;
     };
 
     (async () => {
       try {
-        const [
-          floor,
-          floorNormal,
-          floorRoughness,
-          wallBase,
-          wallNormal,
-          wallRoughness,
-          door,
-        ] = await Promise.all([
+        const [floorBase, wallBase, wallRoughness, door] = await Promise.all([
           loadTexture(
-            "/textures/floor_textures2/1K/Poliigon_WoodVeneerOak_7760_BaseColor.jpg",
+            "/textures/floor_textures4/laminate_floor_02_diff_4k.jpg",
           ),
-          loadTexture(
-            "/textures/floor_textures2/1K/Poliigon_WoodVeneerOak_7760_Normal.png",
-          ),
-          loadTexture(
-            "/textures/floor_textures2/1K/Poliigon_WoodVeneerOak_7760_Roughness.jpg",
-          ),
-          loadTexture(
-            "/textures/wall_textures/512/Poliigon_PlasterPainted_7664_BaseColor.jpg",
-          ),
-          loadTexture(
-            "/textures/wall_textures/512/Poliigon_PlasterPainted_7664_Normal.png",
-          ),
-          loadTexture(
-            "/textures/wall_textures/512/Poliigon_PlasterPainted_7664_Roughness.jpg",
-          ),
+          loadTexture("/textures/wall_texture2/concrete_wall_001_diff_4k.jpg"),
+          loadTexture("/textures/wall_texture2/concrete_wall_001_rough_4k.jpg"),
           loadTexture(
             "/textures/door_textures/10057_wooden_door_v1_diffuse.jpg",
           ),
         ]);
 
+        const floor = createFloorCanvasTexture(floorBase);
+        floorBase.dispose();
+
         if (disposed) {
           floor.dispose();
-          floorNormal.dispose();
-          floorRoughness.dispose();
           wallBase.dispose();
-          wallNormal.dispose();
           wallRoughness.dispose();
           door.dispose();
           return;
         }
 
         setSurfaceTextures({
-          floor: configureTexture(floor, 6, 6, true),
-          floorNormal: configureTexture(floorNormal, 6, 6),
-          floorRoughness: configureTexture(floorRoughness, 6, 6),
+          floor: configureTexture(floor, 1, 1, true),
           wallBase: configureTexture(wallBase, 4, 2, true),
-          wallNormal: configureTexture(wallNormal, 4, 2),
           wallRoughness: configureTexture(wallRoughness, 4, 2),
           door: configureTexture(door, 1, 1, true),
         });
@@ -1039,6 +1206,464 @@ const FloorPlan3DPreview = ({
     });
   }, [center.x, center.y, geometry.roomPolygons, unitScale]);
 
+  const roomCentersByIndex = useMemo(() => {
+    return roomBoundsByIndex.map((bounds) => ({
+      x: (bounds.minX + bounds.maxX) / 2,
+      z: (bounds.minZ + bounds.maxZ) / 2,
+    }));
+  }, [roomBoundsByIndex]);
+
+  const roomPolygonsWorld = useMemo(() => {
+    return geometry.roomPolygons.map((polygon) =>
+      polygon.map((point) => ({
+        x: (point.x - center.x) * unitScale * ROOM_SPACING_FACTOR,
+        z: (point.y - center.y) * unitScale * ROOM_SPACING_FACTOR,
+      })),
+    );
+  }, [center.x, center.y, geometry.roomPolygons, unitScale]);
+
+  const doorZones = useMemo(() => {
+    return geometry.doors.map((door) => {
+      const worldWidth = door.width * unitScale * ROOM_SPACING_FACTOR;
+      const worldDepth = door.depth * unitScale * ROOM_SPACING_FACTOR;
+      return {
+        x: (door.centerX - center.x) * unitScale * ROOM_SPACING_FACTOR,
+        z: (door.centerY - center.y) * unitScale * ROOM_SPACING_FACTOR,
+        radius: Math.max(0.4, worldWidth * 0.52 + worldDepth * 1.4),
+      } as DoorZone;
+    });
+  }, [center.x, center.y, geometry.doors, unitScale]);
+
+  const resolvedRenderablePlacements = useMemo(() => {
+    const placements: ResolvedRenderablePlacement[] = [];
+
+    const isOverlappingPlaced = (
+      candidate: WorldPoint,
+      size: Vec3,
+      roomIndex: number | null,
+    ) => {
+      for (const placed of placements) {
+        const sameRoom =
+          roomIndex === placed.item.roomIndex ||
+          roomIndex === null ||
+          placed.item.roomIndex === null;
+        if (!sameRoom) {
+          continue;
+        }
+
+        const dx = candidate.x - placed.position[0];
+        const dz = candidate.z - placed.position[2];
+        const minX =
+          (size[0] + placed.size[0]) / 2 +
+          OBJECT_BASE_CLEARANCE +
+          (Math.max(size[0], placed.size[0]) >= LARGE_OBJECT_SIZE_THRESHOLD
+            ? 0.06
+            : 0);
+        const minZ =
+          (size[2] + placed.size[2]) / 2 +
+          OBJECT_BASE_CLEARANCE +
+          (Math.max(size[2], placed.size[2]) >= LARGE_OBJECT_SIZE_THRESHOLD
+            ? 0.06
+            : 0);
+
+        if (Math.abs(dx) < minX && Math.abs(dz) < minZ) {
+          return true;
+        }
+
+        const minCenterDistance =
+          (Math.max(size[0], size[2]) +
+            Math.max(placed.size[0], placed.size[2])) /
+            2 +
+          OBJECT_COMFORT_BUFFER;
+        if (Math.hypot(dx, dz) < minCenterDistance) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    for (const item of renderableObjects) {
+      let sizeX = item.size[0];
+      let sizeY = item.size[1];
+      let sizeZ = item.size[2];
+
+      const initialRoomBounds =
+        item.roomIndex !== null &&
+        item.roomIndex >= 0 &&
+        item.roomIndex < roomBoundsByIndex.length
+          ? roomBoundsByIndex[item.roomIndex]
+          : roomBoundsWorld;
+
+      if (initialRoomBounds) {
+        const roomWidth = initialRoomBounds.maxX - initialRoomBounds.minX;
+        const roomDepth = initialRoomBounds.maxZ - initialRoomBounds.minZ;
+        const maxObjWidth = Math.max(0.55, roomWidth * 0.45);
+        const maxObjDepth = Math.max(0.55, roomDepth * 0.45);
+        const fitScale = Math.min(
+          1,
+          maxObjWidth / Math.max(0.01, sizeX),
+          maxObjDepth / Math.max(0.01, sizeZ),
+        );
+
+        sizeX *= fitScale;
+        sizeY *= fitScale;
+        sizeZ *= fitScale;
+      }
+
+      const fittedSize: Vec3 = [
+        Math.max(0.25, sizeX),
+        Math.max(0.25, sizeY),
+        Math.max(0.25, sizeZ),
+      ];
+
+      const worldSpaceCandidate: WorldPoint = {
+        x: (item.position[0] - center.x * unitScale) * ROOM_SPACING_FACTOR,
+        z: (item.position[2] - center.y * unitScale) * ROOM_SPACING_FACTOR,
+      };
+      const planSpaceCandidate: WorldPoint = {
+        x: (item.position[0] - center.x) * unitScale * ROOM_SPACING_FACTOR,
+        z: (item.position[2] - center.y) * unitScale * ROOM_SPACING_FACTOR,
+      };
+
+      const roomBoundsForObject =
+        item.roomIndex !== null &&
+        item.roomIndex >= 0 &&
+        item.roomIndex < roomBoundsByIndex.length
+          ? roomBoundsByIndex[item.roomIndex]
+          : roomBoundsWorld;
+
+      const roomCenterForObject =
+        item.roomIndex !== null &&
+        item.roomIndex >= 0 &&
+        item.roomIndex < roomCentersByIndex.length
+          ? roomCentersByIndex[item.roomIndex]
+          : roomBoundsForObject
+            ? {
+                x: (roomBoundsForObject.minX + roomBoundsForObject.maxX) / 2,
+                z: (roomBoundsForObject.minZ + roomBoundsForObject.maxZ) / 2,
+              }
+            : null;
+
+      const scoreCandidate = (candidate: WorldPoint) => {
+        if (!roomBoundsForObject) {
+          return 0;
+        }
+
+        const centerDist = roomCenterForObject
+          ? Math.hypot(
+              candidate.x - roomCenterForObject.x,
+              candidate.z - roomCenterForObject.z,
+            )
+          : 0;
+
+        const overflowX =
+          candidate.x < roomBoundsForObject.minX
+            ? roomBoundsForObject.minX - candidate.x
+            : candidate.x > roomBoundsForObject.maxX
+              ? candidate.x - roomBoundsForObject.maxX
+              : 0;
+        const overflowZ =
+          candidate.z < roomBoundsForObject.minZ
+            ? roomBoundsForObject.minZ - candidate.z
+            : candidate.z > roomBoundsForObject.maxZ
+              ? candidate.z - roomBoundsForObject.maxZ
+              : 0;
+
+        return centerDist + (overflowX + overflowZ) * 20;
+      };
+
+      let candidate =
+        scoreCandidate(planSpaceCandidate) < scoreCandidate(worldSpaceCandidate)
+          ? planSpaceCandidate
+          : worldSpaceCandidate;
+
+      candidate = clampToBounds(candidate, roomBoundsForObject, fittedSize);
+
+      // Push objects away from door swings/openings to keep pathways clear.
+      for (let iter = 0; iter < 3; iter += 1) {
+        for (const zone of doorZones) {
+          const dx = candidate.x - zone.x;
+          const dz = candidate.z - zone.z;
+          const distance = Math.hypot(dx, dz);
+          const minDistance =
+            zone.radius + Math.max(fittedSize[0], fittedSize[2]) * 0.45;
+          if (distance >= minDistance) {
+            continue;
+          }
+
+          const push = minDistance - distance + 0.02;
+          const fallbackDir = roomCenterForObject
+            ? {
+                x: candidate.x - roomCenterForObject.x,
+                z: candidate.z - roomCenterForObject.z,
+              }
+            : getStableUnitVector(item.key);
+          const dirLength = Math.hypot(
+            distance > 1e-6 ? dx : fallbackDir.x,
+            distance > 1e-6 ? dz : fallbackDir.z,
+          );
+          const nx =
+            dirLength > 1e-6
+              ? (distance > 1e-6 ? dx : fallbackDir.x) / dirLength
+              : 1;
+          const nz =
+            dirLength > 1e-6
+              ? (distance > 1e-6 ? dz : fallbackDir.z) / dirLength
+              : 0;
+
+          candidate = clampToBounds(
+            {
+              x: candidate.x + nx * push,
+              z: candidate.z + nz * push,
+            },
+            roomBoundsForObject,
+            fittedSize,
+          );
+        }
+      }
+
+      let resolvedRotationY = item.rotationY;
+
+      // Keep wall-attached furniture against the nearest wall and facing inward.
+      if (
+        roomCenterForObject &&
+        item.roomIndex !== null &&
+        item.roomIndex >= 0 &&
+        item.roomIndex < roomPolygonsWorld.length &&
+        WALL_ANCHORED_LABEL_REGEX.test(item.label)
+      ) {
+        const polygon = roomPolygonsWorld[item.roomIndex];
+        if (polygon.length >= 2) {
+          let best: {
+            point: WorldPoint;
+            start: WorldPoint;
+            end: WorldPoint;
+            distance: number;
+          } | null = null;
+
+          for (let index = 0; index < polygon.length; index += 1) {
+            const start = polygon[index];
+            const end = polygon[(index + 1) % polygon.length];
+            const projected = projectPointToSegment(candidate, start, end);
+            if (!best || projected.distance < best.distance) {
+              best = {
+                point: projected.point,
+                start,
+                end,
+                distance: projected.distance,
+              };
+            }
+          }
+
+          if (best) {
+            const edgeX = best.end.x - best.start.x;
+            const edgeZ = best.end.z - best.start.z;
+            const edgeLength = Math.hypot(edgeX, edgeZ);
+
+            if (edgeLength > 1e-6) {
+              let nx = -edgeZ / edgeLength;
+              let nz = edgeX / edgeLength;
+              const toCenterX = roomCenterForObject.x - best.point.x;
+              const toCenterZ = roomCenterForObject.z - best.point.z;
+              if (toCenterX * nx + toCenterZ * nz < 0) {
+                nx *= -1;
+                nz *= -1;
+              }
+
+              const inset = Math.max(0.22, fittedSize[2] * 0.46);
+              candidate = clampToBounds(
+                {
+                  x: best.point.x + nx * inset,
+                  z: best.point.z + nz * inset,
+                },
+                roomBoundsForObject,
+                fittedSize,
+              );
+
+              resolvedRotationY = Math.atan2(
+                roomCenterForObject.z - candidate.z,
+                roomCenterForObject.x - candidate.x,
+              );
+            }
+          }
+        }
+      }
+
+      // Resolve object stacking by iteratively separating overlapping footprints.
+      for (let iter = 0; iter < 8; iter += 1) {
+        let moved = false;
+
+        for (const placed of placements) {
+          const sameRoom =
+            item.roomIndex === placed.item.roomIndex ||
+            item.roomIndex === null ||
+            placed.item.roomIndex === null;
+          if (!sameRoom) {
+            continue;
+          }
+
+          const dx = candidate.x - placed.position[0];
+          const dz = candidate.z - placed.position[2];
+          const overlapX =
+            (fittedSize[0] + placed.size[0]) / 2 +
+            OBJECT_BASE_CLEARANCE -
+            Math.abs(dx);
+          const overlapZ =
+            (fittedSize[2] + placed.size[2]) / 2 +
+            OBJECT_BASE_CLEARANCE -
+            Math.abs(dz);
+
+          if (overlapX <= 0 || overlapZ <= 0) {
+            continue;
+          }
+
+          const fallback = getStableUnitVector(
+            `${item.key}-${placed.item.key}`,
+          );
+          const dirX = Math.abs(dx) > 1e-5 ? Math.sign(dx) : fallback.x;
+          const dirZ = Math.abs(dz) > 1e-5 ? Math.sign(dz) : fallback.z;
+
+          if (overlapX < overlapZ) {
+            candidate.x += dirX * (overlapX + 0.04);
+          } else {
+            candidate.z += dirZ * (overlapZ + 0.04);
+          }
+
+          candidate = clampToBounds(candidate, roomBoundsForObject, fittedSize);
+          moved = true;
+        }
+
+        if (!moved) {
+          break;
+        }
+      }
+
+      // Try nearby fallback slots before giving up on an overlapping placement.
+      if (isOverlappingPlaced(candidate, fittedSize, item.roomIndex)) {
+        let foundFreeSpot = false;
+        const radiusStep = 0.12;
+        const maxRadius = 1.6;
+
+        for (
+          let radius = radiusStep;
+          radius <= maxRadius;
+          radius += radiusStep
+        ) {
+          for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+            const trial = clampToBounds(
+              {
+                x: candidate.x + Math.cos(angle) * radius,
+                z: candidate.z + Math.sin(angle) * radius,
+              },
+              roomBoundsForObject,
+              fittedSize,
+            );
+
+            if (!isOverlappingPlaced(trial, fittedSize, item.roomIndex)) {
+              candidate = trial;
+              foundFreeSpot = true;
+              break;
+            }
+          }
+
+          if (foundFreeSpot) {
+            break;
+          }
+        }
+
+        // Last resort: skip rendering this object to guarantee no visual stacking.
+        if (!foundFreeSpot) {
+          continue;
+        }
+      }
+
+      if (
+        roomCenterForObject &&
+        !WALL_ANCHORED_LABEL_REGEX.test(item.label) &&
+        CENTER_FACING_LABEL_REGEX.test(item.label)
+      ) {
+        resolvedRotationY = Math.atan2(
+          roomCenterForObject.z - candidate.z,
+          roomCenterForObject.x - candidate.x,
+        );
+      }
+
+      placements.push({
+        item,
+        size: fittedSize,
+        rotationY: resolvedRotationY,
+        position: [
+          candidate.x,
+          item.modelUrl
+            ? 0.02
+            : Math.max(item.position[1] + fittedSize[1] / 2, fittedSize[1] / 2),
+          candidate.z,
+        ],
+      });
+    }
+
+    return placements;
+  }, [
+    center.x,
+    center.y,
+    doorZones,
+    renderableObjects,
+    roomBoundsByIndex,
+    roomBoundsWorld,
+    roomCentersByIndex,
+    roomPolygonsWorld,
+    unitScale,
+  ]);
+
+  // Apply per-object user overrides (move/rotate/scale via hotkeys) on top of solver output.
+  const finalRenderablePlacements = useMemo(() => {
+    if (Object.keys(respaceObjectOverrides).length === 0) {
+      return resolvedRenderablePlacements;
+    }
+    return resolvedRenderablePlacements.map((p) => {
+      const override = respaceObjectOverrides[p.item.key];
+      if (!override) return p;
+      const sf = Math.max(0.2, Math.min(2, override.scaleFactor ?? 1));
+      return {
+        ...p,
+        position: [
+          p.position[0] + (override.dx ?? 0),
+          p.position[1],
+          p.position[2] + (override.dz ?? 0),
+        ] as Vec3,
+        size: [p.size[0] * sf, p.size[1] * sf, p.size[2] * sf] as Vec3,
+        rotationY: p.rotationY + (override.dRotY ?? 0),
+      };
+    });
+  }, [resolvedRenderablePlacements, respaceObjectOverrides]);
+
+  const roomFloorGeometries = useMemo(() => {
+    const uvWorldScale =
+      (unitScale * ROOM_SPACING_FACTOR) / FLOOR_PLANK_WORLD_SIZE;
+
+    return geometry.roomShapes.map((shape) => {
+      const floorGeometry = new ShapeGeometry(shape);
+      const position = floorGeometry.getAttribute("position");
+      const uv = floorGeometry.getAttribute("uv");
+
+      for (let index = 0; index < position.count; index += 1) {
+        const x = position.getX(index);
+        const y = -position.getY(index);
+        uv.setXY(index, x * uvWorldScale, y * uvWorldScale);
+      }
+
+      uv.needsUpdate = true;
+      return floorGeometry;
+    });
+  }, [geometry.roomShapes, unitScale]);
+
+  useEffect(() => {
+    return () => {
+      roomFloorGeometries.forEach((floorGeometry) => floorGeometry.dispose());
+    };
+  }, [roomFloorGeometries]);
+
   const getRoomIndexForWorld = (x: number, z: number): number | null => {
     const planPoint: Point2D = {
       x: x / (unitScale * ROOM_SPACING_FACTOR) + center.x,
@@ -1138,12 +1763,15 @@ const FloorPlan3DPreview = ({
                 unitScale * ROOM_SPACING_FACTOR,
               ]}
             >
-              <shapeGeometry args={[shape]} />
+              {roomFloorGeometries[index] && (
+                <primitive
+                  object={roomFloorGeometries[index]}
+                  attach="geometry"
+                />
+              )}
               <meshStandardMaterial
                 map={surfaceTextures?.floor}
-                normalMap={surfaceTextures?.floorNormal}
-                roughnessMap={surfaceTextures?.floorRoughness}
-                roughness={0.8}
+                roughness={0.76}
                 metalness={0.02}
                 side={DoubleSide}
               />
@@ -1155,6 +1783,7 @@ const FloorPlan3DPreview = ({
               const edgeColor = roomNames[index]?.trim()
                 ? "#d6ffe8"
                 : "#dfe8ff";
+              const isRoomRunning = runningRoomIndices.includes(index);
               const roomShapeGeometry = new ShapeGeometry(shape);
 
               return (
@@ -1209,6 +1838,34 @@ const FloorPlan3DPreview = ({
                       depthTest={false}
                     />
                   </lineSegments>
+
+                  {isRoomRunning && (
+                    <mesh
+                      rotation={[-Math.PI / 2, 0, 0]}
+                      position={[
+                        -center.x * unitScale * ROOM_SPACING_FACTOR,
+                        wallHeight + 0.21,
+                        -center.y * unitScale * ROOM_SPACING_FACTOR,
+                      ]}
+                      scale={[
+                        unitScale * ROOM_SPACING_FACTOR,
+                        unitScale * ROOM_SPACING_FACTOR,
+                        unitScale * ROOM_SPACING_FACTOR,
+                      ]}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
+                      <shapeGeometry args={[shape]} />
+                      <meshBasicMaterial
+                        color="#0c1326"
+                        transparent
+                        opacity={0.55}
+                        side={DoubleSide}
+                        depthWrite={false}
+                        depthTest={false}
+                      />
+                    </mesh>
+                  )}
                 </>
               );
             })()}
@@ -1246,6 +1903,10 @@ const FloorPlan3DPreview = ({
                   return;
                 }
 
+                if (runningRoomIndices.includes(index)) {
+                  return;
+                }
+
                 if (!isTopView) {
                   return;
                 }
@@ -1265,32 +1926,65 @@ const FloorPlan3DPreview = ({
           </group>
         ))}
 
-        {geometry.walls.map((wall, index) => (
-          <mesh
-            key={`wall-${index}`}
-            position={[
-              (wall.centerX - center.x) * unitScale * ROOM_SPACING_FACTOR,
-              wallHeight / 2,
-              (wall.centerY - center.y) * unitScale * ROOM_SPACING_FACTOR,
-            ]}
-            rotation={[0, -wall.rotationY, 0]}
-          >
-            <boxGeometry
-              args={[
-                wall.width * unitScale * ROOM_SPACING_FACTOR,
-                wallHeight,
-                wall.depth * unitScale * ROOM_SPACING_FACTOR,
+        {geometry.walls.map((wall, index) => {
+          const wallWorldWidth = wall.width * unitScale * ROOM_SPACING_FACTOR;
+          const wallWorldDepth = wall.depth * unitScale * ROOM_SPACING_FACTOR;
+          // Scale texture repeat proportionally to physical wall size so
+          // texture density stays consistent regardless of wall length.
+          const wallTileSize = 1.8; // world-units per texture tile
+          const wallRepeatX = Math.max(1, wallWorldWidth / wallTileSize);
+          const wallRepeatY = Math.max(1, wallHeight / wallTileSize);
+
+          return (
+            <mesh
+              key={`wall-${index}`}
+              position={[
+                (wall.centerX - center.x) * unitScale * ROOM_SPACING_FACTOR,
+                wallHeight / 2,
+                (wall.centerY - center.y) * unitScale * ROOM_SPACING_FACTOR,
               ]}
-            />
-            <meshStandardMaterial
-              map={surfaceTextures?.wallBase}
-              normalMap={surfaceTextures?.wallNormal}
-              roughnessMap={surfaceTextures?.wallRoughness}
-              roughness={0.88}
-              metalness={0.03}
-            />
-          </mesh>
-        ))}
+              rotation={[0, -wall.rotationY, 0]}
+            >
+              <boxGeometry
+                args={[wallWorldWidth, wallHeight, wallWorldDepth]}
+              />
+              <meshStandardMaterial
+                map={
+                  surfaceTextures?.wallBase
+                    ? (() => {
+                        const t = surfaceTextures.wallBase.clone();
+                        t.repeat.set(wallRepeatX, wallRepeatY);
+                        t.needsUpdate = true;
+                        return t;
+                      })()
+                    : undefined
+                }
+                normalMap={
+                  surfaceTextures?.wallNormal
+                    ? (() => {
+                        const t = surfaceTextures.wallNormal.clone();
+                        t.repeat.set(wallRepeatX, wallRepeatY);
+                        t.needsUpdate = true;
+                        return t;
+                      })()
+                    : undefined
+                }
+                roughnessMap={
+                  surfaceTextures?.wallRoughness
+                    ? (() => {
+                        const t = surfaceTextures.wallRoughness.clone();
+                        t.repeat.set(wallRepeatX, wallRepeatY);
+                        t.needsUpdate = true;
+                        return t;
+                      })()
+                    : undefined
+                }
+                roughness={0.88}
+                metalness={0.03}
+              />
+            </mesh>
+          );
+        })}
 
         {geometry.doors.map((door, index) => (
           <mesh
@@ -1320,101 +2014,100 @@ const FloorPlan3DPreview = ({
           </mesh>
         ))}
 
-        {renderableObjects.map((item) =>
-          (() => {
-            let sizeX = item.size[0];
-            let sizeY = item.size[1];
-            let sizeZ = item.size[2];
+        {finalRenderablePlacements.map((placement) => {
+          const { item, position, size, rotationY } = placement;
+          const meshKey = `respace-object-${item.key}`;
+          const isSelected = selectedRespaceObjectKey === item.key;
 
-            if (roomBoundsWorld) {
-              const roomWidth = roomBoundsWorld.maxX - roomBoundsWorld.minX;
-              const roomDepth = roomBoundsWorld.maxZ - roomBoundsWorld.minZ;
-              const maxObjWidth = Math.max(0.55, roomWidth * 0.45);
-              const maxObjDepth = Math.max(0.55, roomDepth * 0.45);
-              const fitScale = Math.min(
-                1,
-                maxObjWidth / Math.max(0.01, sizeX),
-                maxObjDepth / Math.max(0.01, sizeZ),
-              );
+          const selectionRing = isSelected ? (
+            <mesh
+              rotation={[-Math.PI / 2, 0, 0]}
+              position={[position[0], 0.03, position[2]]}
+            >
+              <ringGeometry
+                args={[
+                  Math.max(size[0], size[2]) * 0.48,
+                  Math.max(size[0], size[2]) * 0.56,
+                  40,
+                ]}
+              />
+              <meshBasicMaterial
+                color="#ffd580"
+                transparent
+                opacity={0.9}
+                side={DoubleSide}
+              />
+            </mesh>
+          ) : null;
 
-              sizeX *= fitScale;
-              sizeY *= fitScale;
-              sizeZ *= fitScale;
-            }
-
-            const fittedSize: Vec3 = [
-              Math.max(0.25, sizeX),
-              Math.max(0.25, sizeY),
-              Math.max(0.25, sizeZ),
-            ];
-
-            const rawX =
-              (item.position[0] - center.x * unitScale) * ROOM_SPACING_FACTOR;
-            const rawZ =
-              (item.position[2] - center.y * unitScale) * ROOM_SPACING_FACTOR;
-
-            const x = roomBoundsWorld
-              ? clampNumber(
-                  rawX,
-                  roomBoundsWorld.minX + fittedSize[0] / 2 + 0.06,
-                  roomBoundsWorld.maxX - fittedSize[0] / 2 - 0.06,
-                )
-              : rawX;
-            const z = roomBoundsWorld
-              ? clampNumber(
-                  rawZ,
-                  roomBoundsWorld.minZ + fittedSize[2] / 2 + 0.06,
-                  roomBoundsWorld.maxZ - fittedSize[2] / 2 - 0.06,
-                )
-              : rawZ;
-
-            const meshPosition: Vec3 = [
-              x,
-              Math.max(item.position[1] + fittedSize[1] / 2, fittedSize[1] / 2),
-              z,
-            ];
-
-            const meshKey = `respace-object-${item.key}`;
-
-            if (item.modelUrl) {
-              return (
+          if (item.modelUrl) {
+            return (
+              <group
+                key={`${meshKey}-group`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectRespaceObject?.(isSelected ? null : item.key);
+                  if (!isSelected) onSelectManualObject?.(null);
+                }}
+              >
+                {selectionRing}
                 <Suspense key={`${meshKey}-suspense`} fallback={null}>
                   <ModelObject
                     meshKey={meshKey}
                     modelUrl={item.modelUrl}
-                    position={meshPosition}
-                    targetSize={fittedSize}
-                    rotationY={item.rotationY}
+                    position={position}
+                    targetSize={size}
+                    rotationY={rotationY}
                   />
                 </Suspense>
-              );
-            }
+              </group>
+            );
+          }
 
-            if (item.textureUrl) {
-              return (
+          if (item.textureUrl) {
+            return (
+              <group
+                key={`${meshKey}-group`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectRespaceObject?.(isSelected ? null : item.key);
+                  if (!isSelected) onSelectManualObject?.(null);
+                }}
+              >
+                {selectionRing}
                 <TexturedObjectBox
                   key={meshKey}
                   meshKey={meshKey}
-                  position={meshPosition}
-                  size={fittedSize}
-                  rotationY={item.rotationY}
+                  position={position}
+                  size={size}
+                  rotationY={rotationY}
                   textureUrl={item.textureUrl}
                 />
-              );
-            }
+              </group>
+            );
+          }
 
-            return (
+          return (
+            <group
+              key={`${meshKey}-group`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelectRespaceObject?.(isSelected ? null : item.key);
+                if (!isSelected) onSelectManualObject?.(null);
+              }}
+            >
+              {selectionRing}
               <mesh
                 key={meshKey}
-                position={meshPosition}
-                rotation={[0, item.rotationY, 0]}
+                position={position}
+                rotation={[0, rotationY, 0]}
               >
-                <boxGeometry args={fittedSize} />
+                <boxGeometry args={size} />
                 <meshStandardMaterial color="#7e8a94" roughness={0.75} />
               </mesh>
-            );
-          })(),
-        )}
+            </group>
+          );
+        })}
 
         {manualObjects.map((item) => {
           const roomScale = Math.max(

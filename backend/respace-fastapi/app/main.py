@@ -245,9 +245,18 @@ def serve_asset_file(asset_jid: str, file_name: str) -> FileResponse:
 @app.post("/respace/run", response_model=RespaceRunResponse)
 def run_respace(payload: RespaceRunRequest, request: Request) -> RespaceRunResponse:
     try:
+        # Derive room name: generationConfig.roomName > rooms[0] > empty string
+        room_name = (
+            payload.generationConfig.roomName.strip()
+            or (payload.rooms[0].strip() if payload.rooms else "")
+            or ""
+        )
         result = runner.run(
             geometry=payload.geometry,
             prompt=payload.generationConfig.prompt,
+            unit_scale=payload.generationConfig.unitScale,
+            wall_height=payload.generationConfig.wallHeight,
+            room_name=room_name,
         )
         _attach_asset_urls(result, request)
         return RespaceRunResponse(**result)

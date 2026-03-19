@@ -8,12 +8,14 @@ class GenerationConfig(BaseModel):
     wallThickness: float = Field(default=0.15)
     unitScale: float = Field(default=0.01)
     prompt: str = Field(default="Generate a realistic furnished interior.")
+    roomName: str = Field(default="")
 
 
 class RespaceRunRequest(BaseModel):
     source: str
     geometry: dict[str, Any]
     generationConfig: GenerationConfig
+    rooms: list[str] = Field(default_factory=list)
 
 
 class RespaceRunResponse(BaseModel):

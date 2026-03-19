@@ -404,6 +404,36 @@
   background: rgba(12, 20, 42, 0.38);
 }
 
+.fp3d-room-dialog-submit-danger {
+  background: rgba(180, 30, 30, 0.45);
+  border-color: rgba(255, 100, 100, 0.35);
+}
+
+.fp3d-room-dialog-prompt-preview {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(12, 20, 42, 0.4);
+  color: rgba(220, 235, 255, 0.72);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  resize: none;
+  cursor: default;
+  font-style: italic;
+}
+
+.fp3d-room-dialog-prompt-edit {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(12, 20, 42, 0.58);
+  color: #f8fbff;
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 80px;
+}
+
 .fp3d-assets-sidebar {
   position: fixed;
   z-index: 27;
