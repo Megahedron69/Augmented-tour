@@ -232,21 +232,6 @@ main {
   min-height: 340px;
 }
 
-.floating-chip {
-  position: absolute;
-  left: 1rem;
-  bottom: 1rem;
-  border-radius: 999px;
-  padding: 0.55rem 0.8rem;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg-soft) 82%, transparent);
-  backdrop-filter: blur(10px);
-  display: inline-flex;
-  gap: 0.4rem;
-  align-items: center;
-  font-size: 0.88rem;
-}
-
 .section-heading h2 {
   font-size: clamp(1.5rem, 2.4vw, 2.05rem);
   margin-bottom: 0.55rem;
@@ -430,6 +415,171 @@ main {
   box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.2);
 }
 
+.tour-selector-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at top, rgba(14, 165, 183, 0.18), transparent 40%),
+    rgba(5, 10, 24, 0.48);
+  backdrop-filter: blur(18px);
+}
+
+.tour-selector-modal {
+  width: min(960px, 100%);
+  border: 1px solid
+    color-mix(in srgb, var(--line) 80%, rgba(255, 255, 255, 0.18));
+  border-radius: 1.6rem;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-soft) 84%, transparent),
+    color-mix(in srgb, var(--bg) 74%, transparent)
+  );
+  box-shadow:
+    0 32px 80px rgba(2, 10, 28, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(22px);
+  overflow: hidden;
+}
+
+.tour-selector-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.4rem 1.4rem 0;
+}
+
+.tour-selector-kicker {
+  margin-bottom: 0.45rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.tour-selector-header h2 {
+  margin-bottom: 0.45rem;
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+}
+
+.tour-selector-header p {
+  max-width: 58ch;
+  color: var(--muted);
+}
+
+.tour-selector-close {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-soft) 84%, transparent);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tour-selector-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1.4rem;
+}
+
+.tour-option-card {
+  position: relative;
+  min-height: 360px;
+  border-radius: 1.35rem;
+  overflow: hidden;
+  border: 1px solid
+    color-mix(in srgb, var(--line) 70%, rgba(255, 255, 255, 0.22));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0.02)
+  );
+  text-align: left;
+  color: var(--text);
+  box-shadow:
+    0 24px 60px rgba(9, 20, 49, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.tour-option-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tour-option-glow {
+  position: absolute;
+  inset: auto auto 0 0;
+  width: 100%;
+  height: 72%;
+  background:
+    linear-gradient(180deg, rgba(7, 15, 34, 0.05), rgba(7, 15, 34, 0.82)),
+    radial-gradient(
+      circle at top right,
+      rgba(14, 165, 183, 0.3),
+      transparent 38%
+    );
+}
+
+.tour-option-content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1.2rem;
+}
+
+.tour-option-badge {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.tour-option-card h3 {
+  font-size: 1.3rem;
+}
+
+.tour-option-card p {
+  max-width: 34ch;
+  color: rgba(241, 245, 255, 0.82);
+}
+
+.tour-option-action {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem 0.95rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.22);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
 @media (max-width: 980px) {
   .hero {
     grid-template-columns: 1fr;
@@ -437,6 +587,10 @@ main {
 
   .feature-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tour-selector-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -457,5 +611,22 @@ main {
   main {
     width: min(1160px, calc(100% - 1.3rem));
     padding-top: 3.4rem;
+  }
+
+  .tour-selector-overlay {
+    padding: 0.85rem;
+  }
+
+  .tour-selector-modal {
+    border-radius: 1.2rem;
+  }
+
+  .tour-selector-header,
+  .tour-selector-grid {
+    padding: 1rem;
+  }
+
+  .tour-option-card {
+    min-height: 300px;
   }
 }

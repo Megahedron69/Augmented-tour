@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
+  Building2,
   CheckCircle2,
   Compass,
   DraftingCompass,
@@ -10,10 +11,12 @@ import {
   Moon,
   Sparkles,
   Sun,
-  Upload,
+  X,
 } from "lucide-react";
 import VirtualTour from "./components/VirtualTour";
 import FloorPlanTo3DLab from "./components/FloorPlanTo3DLab.tsx";
+import { TOUR_CONFIGS } from "./constants/tourConfigs";
+import { DEFAULT_TOUR_ID, isTourId, type TourId } from "./types/tours";
 import "./App.css";
 
 type Theme = "dark" | "light";
@@ -44,6 +47,15 @@ const App = () => {
     return "landing";
   });
 
+  const [selectedTour, setSelectedTour] = useState<TourId>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tour = params.get("tour");
+
+    return isTourId(tour) ? tour : DEFAULT_TOUR_ID;
+  });
+
+  const [showTourSelector, setShowTourSelector] = useState(false);
+
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("mrx-theme", theme);
@@ -53,13 +65,48 @@ const App = () => {
     const url = new URL(window.location.href);
     if (currentView === "tour") {
       url.searchParams.set("view", "tour");
+      if (selectedTour === "office") {
+        url.searchParams.set("tour", selectedTour);
+      } else {
+        url.searchParams.delete("tour");
+      }
     } else if (currentView === "feature2") {
       url.searchParams.set("view", "feature2");
+      url.searchParams.delete("tour");
     } else {
       url.searchParams.delete("view");
+      url.searchParams.delete("tour");
     }
     window.history.replaceState({}, "", url);
-  }, [currentView]);
+  }, [currentView, selectedTour]);
+
+  useEffect(() => {
+    if (!showTourSelector) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showTourSelector]);
+
+  useEffect(() => {
+    if (!showTourSelector) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowTourSelector(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showTourSelector]);
 
   const features = useMemo(
     () => [
@@ -75,9 +122,9 @@ const App = () => {
       {
         id: 2,
         title: "2D Floor Plan to 3D Experience",
-        state: "In Progress" as FeatureState,
+        state: "Completed" as FeatureState,
         description:
-          "The next milestone maps 2D floor plans into interactive 3D spaces for faster scene creation and alignment.",
+          "The 2D floor plan pipeline now maps plans into interactive 3D spaces for faster scene creation and alignment.",
         icon: Layers,
         image: "/360Assets/floor_plans/floor_01.png",
       },
@@ -94,9 +141,43 @@ const App = () => {
     [],
   );
 
+  const tourOptions = useMemo(
+    () => [
+      {
+        id: "home" as TourId,
+        title: TOUR_CONFIGS.home.title,
+        description:
+          "Open the existing residential walkthrough with the current home panorama and XR component flow.",
+        image: TOUR_CONFIGS.home.previewImage,
+        icon: House,
+        badge: "Residential",
+      },
+      {
+        id: "office" as TourId,
+        title: TOUR_CONFIGS.office.title,
+        description:
+          "Launch the IOCL office demo with isolated storage, reception entry, and office-specific preloading.",
+        image: TOUR_CONFIGS.office.previewImage,
+        icon: Building2,
+        badge: "Corporate",
+      },
+    ],
+    [],
+  );
+
+  const openTourSelector = () => {
+    setShowTourSelector(true);
+  };
+
+  const handleTourSelection = (tourId: TourId) => {
+    setSelectedTour(tourId);
+    setCurrentView("tour");
+    setShowTourSelector(false);
+  };
+
   const handleFeatureClick = (featureId: number) => {
     if (featureId === 1) {
-      setCurrentView("tour");
+      openTourSelector();
       return;
     }
 
@@ -109,7 +190,13 @@ const App = () => {
   };
 
   if (currentView === "tour") {
-    return <VirtualTour onGoHome={() => setCurrentView("landing")} />;
+    return (
+      <VirtualTour
+        key={selectedTour}
+        tourId={selectedTour}
+        onGoHome={() => setCurrentView("landing")}
+      />
+    );
   }
 
   if (currentView === "feature2") {
@@ -131,13 +218,6 @@ const App = () => {
             <a href="#home">Home</a>
             <a href="#features">Features</a>
             <a href="#roadmap">Roadmap</a>
-            <button
-              type="button"
-              className="nav-link-btn"
-              onClick={() => setCurrentView("feature2")}
-            >
-              Feature 2 Lab
-            </button>
           </nav>
 
           <button
@@ -176,7 +256,7 @@ const App = () => {
                 <button
                   type="button"
                   className="primary-btn"
-                  onClick={() => setCurrentView("tour")}
+                  onClick={openTourSelector}
                 >
                   Explore Virtual Tour
                   <ArrowRight size={16} />
@@ -202,10 +282,6 @@ const App = () => {
                 alt="Panorama preview"
                 className="hero-image"
               />
-              <div className="floating-chip">
-                <Upload size={14} />
-                Panorama Upload Pipeline
-              </div>
             </motion.div>
           </section>
 
@@ -306,9 +382,9 @@ const App = () => {
                 </div>
               </div>
               <div className="timeline-item">
-                <span className="timeline-dot active" />
+                <span className="timeline-dot completed" />
                 <div>
-                  <h4>Phase 2 · Next Focus</h4>
+                  <h4>Phase 2 · Delivered</h4>
                   <p>2D floor plan to 3D pipeline and interaction mapping.</p>
                 </div>
               </div>
@@ -323,6 +399,86 @@ const App = () => {
           </section>
         </main>
       </div>
+
+      <AnimatePresence>
+        {showTourSelector && (
+          <motion.div
+            className="tour-selector-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowTourSelector(false)}
+          >
+            <motion.div
+              className="tour-selector-modal"
+              initial={{ opacity: 0, y: 48, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.98 }}
+              transition={{ type: "spring", damping: 24, stiffness: 280 }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="tour-selector-header">
+                <div>
+                  <p className="tour-selector-kicker">Choose Demo Tour</p>
+                  <h2>Open the right spatial walkthrough.</h2>
+                  <p>
+                    Home and IOCL office now keep separate route state, room
+                    markers, and XR component data.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="tour-selector-close"
+                  onClick={() => setShowTourSelector(false)}
+                  aria-label="Close tour selector"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="tour-selector-grid">
+                {tourOptions.map((option, index) => {
+                  const Icon = option.icon;
+
+                  return (
+                    <motion.button
+                      key={option.id}
+                      type="button"
+                      className="tour-option-card"
+                      onClick={() => handleTourSelection(option.id)}
+                      initial={{ opacity: 0, y: 24 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 16 }}
+                      transition={{ delay: index * 0.08, duration: 0.32 }}
+                      whileHover={{ y: -6, scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                    >
+                      <img
+                        src={option.image}
+                        alt={option.title}
+                        className="tour-option-image"
+                      />
+                      <div className="tour-option-glow" />
+                      <div className="tour-option-content">
+                        <span className="tour-option-badge">
+                          <Icon size={16} />
+                          {option.badge}
+                        </span>
+                        <h3>{option.title}</h3>
+                        <p>{option.description}</p>
+                        <span className="tour-option-action">
+                          Enter Tour
+                          <ArrowRight size={15} />
+                        </span>
+                      </div>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

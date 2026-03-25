@@ -7,6 +7,7 @@ import { memo, useState } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import { Sparkles, Info, DoorOpen } from "lucide-react";
 import ReactDOM from "react-dom";
+import { formatRoomLabel } from "../utils/tourFormatting";
 
 interface RoomNodeData {
   label: string;
@@ -50,7 +51,7 @@ export const RoomNode = memo<NodeProps<RoomNodeData>>(({ data }) => {
         {/* Room name with icon */}
         <div className="room-label-wrapper">
           <DoorOpen className="room-label-icon" size={14} />
-          <div className="room-label">{label}</div>
+          <div className="room-label">{formatRoomLabel(label)}</div>
         </div>
 
         {/* XR component indicator */}

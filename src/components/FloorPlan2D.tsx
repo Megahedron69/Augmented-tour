@@ -16,19 +16,22 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { X } from "lucide-react";
 import type { RoomGroup } from "../utils/zindDataParser";
-import { ROOM_MARKERS } from "../constants/roomMarkers";
+import { getTourRoomMarkers } from "../constants/roomMarkers";
 import { getComponentsForRoom } from "../utils/componentStorage";
 import { loadNavigationMarkers } from "../utils/navigationMarkerStorage";
 import type { RoomComponent } from "../types/roomComponents";
+import { DEFAULT_TOUR_ID, type TourId } from "../types/tours";
+import { formatFloorLabel } from "../utils/tourFormatting";
 import { RoomNode } from "./RoomNode.tsx";
 import "./FloorPlan2D.css";
 
 interface FloorPlan2DProps {
   roomGroups: RoomGroup[];
   currentRoom: string;
-  onRoomClick: (roomLabel: string) => void;
+  onRoomClick: (roomLabel: string, preferredFloor?: number) => void;
   onClose?: () => void;
   compact?: boolean;
+  tourId?: TourId;
 }
 
 interface RoomNodeData {
@@ -183,16 +186,18 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
   onRoomClick,
   onClose,
   compact = false,
+  tourId = DEFAULT_TOUR_ID,
 }) => {
   const [hoveredRoom, setHoveredRoom] = useState<string | null>(null);
   const [selectedFloor, setSelectedFloor] = useState<number | "all">("all");
 
   const roomFloorMap = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, number[]>();
     roomGroups.forEach((room) => {
-      if (room.primaryPano) {
-        map.set(room.label.toLowerCase(), room.primaryPano.floorNumber);
-      }
+      map.set(
+        room.label.toLowerCase(),
+        room.panoramas.map((pano) => pano.floorNumber),
+      );
     });
     return map;
   }, [roomGroups]);
@@ -200,9 +205,7 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
   const availableFloors = useMemo(() => {
     const floors = new Set<number>();
     roomGroups.forEach((room) => {
-      if (room.primaryPano) {
-        floors.add(room.primaryPano.floorNumber);
-      }
+      room.panoramas.forEach((pano) => floors.add(pano.floorNumber));
     });
     return [...floors].sort((a, b) => a - b);
   }, [roomGroups]);
@@ -211,13 +214,15 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
   const { nodes, edges } = useMemo(() => {
     // Extract connections from ROOM_MARKERS + dynamic localStorage markers
     const allConnections: [string, string][] = [];
-    Object.entries(ROOM_MARKERS).forEach(([fromRoom, destinations]) => {
-      Object.keys(destinations).forEach((toRoom) => {
-        allConnections.push([fromRoom.toLowerCase(), toRoom.toLowerCase()]);
-      });
-    });
+    Object.entries(getTourRoomMarkers(tourId)).forEach(
+      ([fromRoom, destinations]) => {
+        Object.keys(destinations).forEach((toRoom) => {
+          allConnections.push([fromRoom.toLowerCase(), toRoom.toLowerCase()]);
+        });
+      },
+    );
 
-    const dynamicMarkers = loadNavigationMarkers();
+    const dynamicMarkers = loadNavigationMarkers(tourId);
     Object.entries(dynamicMarkers).forEach(([fromRoom, markers]) => {
       markers.forEach((marker) => {
         allConnections.push([
@@ -229,7 +234,7 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
 
     const visibleRooms = roomGroups.filter((room) => {
       if (selectedFloor === "all") return true;
-      return room.primaryPano?.floorNumber === selectedFloor;
+      return room.panoramas.some((pano) => pano.floorNumber === selectedFloor);
     });
 
     const visibleRoomKeys = new Set(
@@ -245,7 +250,7 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
         return true;
       }
 
-      return roomFloorMap.get(from) === selectedFloor;
+      return roomFloorMap.get(from)?.includes(selectedFloor) ?? false;
     });
 
     // Calculate positions
@@ -258,8 +263,13 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
     // Create nodes
     const flowNodes: Node<RoomNodeData>[] = visibleRooms.map((room) => {
       const roomKey = room.label.toLowerCase();
-      const components = getComponentsForRoom(room.label) || [];
+      const components = getComponentsForRoom(room.label, tourId) || [];
       const pos = positions.get(roomKey) || { x: 400, y: 300 };
+      const preferredFloor =
+        selectedFloor === "all"
+          ? undefined
+          : room.panoramas.find((pano) => pano.floorNumber === selectedFloor)
+              ?.floorNumber;
 
       return {
         id: roomKey,
@@ -269,7 +279,7 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
           label: room.label,
           components: components.map(getComponentSummary),
           isCurrentRoom: room.label.toLowerCase() === currentRoom.toLowerCase(),
-          onClick: () => onRoomClick(room.label),
+          onClick: () => onRoomClick(room.label, preferredFloor),
           onHover: () => setHoveredRoom(roomKey),
           onLeave: () => setHoveredRoom(null),
         },
@@ -278,8 +288,8 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
 
     // Create edges: thin, curved, bidirectional markers for clarity
     const flowEdges: Edge[] = connections.map(([from, to], i) => {
-      const fromFloor = roomFloorMap.get(from);
-      const toFloor = roomFloorMap.get(to);
+      const fromFloor = roomFloorMap.get(from)?.[0];
+      const toFloor = roomFloorMap.get(to)?.[0];
       const isCrossFloor =
         selectedFloor === "all" &&
         fromFloor !== undefined &&
@@ -357,6 +367,7 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
     hoveredRoom,
     roomFloorMap,
     selectedFloor,
+    tourId,
   ]);
 
   const nodeTypes: NodeTypes = useMemo(() => ({ roomNode: RoomNode }), []);
@@ -397,7 +408,7 @@ export const FloorPlan2D: React.FC<FloorPlan2DProps> = ({
               className={selectedFloor === floor ? "active" : ""}
               onClick={() => setSelectedFloor(floor)}
             >
-              Floor {floor}
+              {formatFloorLabel(floor)}
             </button>
           ))}
         </div>

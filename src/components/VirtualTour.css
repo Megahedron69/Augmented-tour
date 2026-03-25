@@ -1146,3 +1146,25 @@
     0 0 1px rgba(255, 255, 255, 0.2) inset;
   transform: translateX(-5px);
 }
+
+.mode-btn.danger:hover {
+  border-color: rgba(255, 107, 107, 0.35);
+  box-shadow:
+    0 6px 24px rgba(255, 107, 107, 0.16),
+    0 0 20px rgba(255, 107, 107, 0.08),
+    0 0 1px rgba(255, 255, 255, 0.15) inset;
+}
+
+.mode-btn.danger.active {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 107, 107, 0.26) 0%,
+    rgba(255, 153, 102, 0.16) 100%
+  );
+  border-color: rgba(255, 107, 107, 0.62);
+  color: #ffb7b7;
+  box-shadow:
+    0 6px 28px rgba(255, 107, 107, 0.28),
+    0 0 30px rgba(255, 107, 107, 0.16),
+    0 0 1px rgba(255, 255, 255, 0.2) inset;
+}
