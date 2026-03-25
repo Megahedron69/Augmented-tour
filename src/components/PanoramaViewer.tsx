@@ -8,14 +8,17 @@ import React, {
 import { useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Html } from "@react-three/drei";
 import * as THREE from "three";
-import { MousePointerClick, DoorOpen, MoveRight } from "lucide-react";
+import { MousePointerClick, DoorOpen, MoveRight, Trash2 } from "lucide-react";
 import type { ParsedPano } from "../utils/zindDataParser";
 import { getRoomDestinations } from "../constants/roomMarkers";
 import { getComponentsForRoom } from "../utils/componentStorage";
 import type { RoomComponent } from "../types/roomComponents";
+import type { NavigationMarker } from "../types/navigationMarkers";
 import { getMarkersForRoom } from "../utils/navigationMarkerStorage";
 import { XRComponentRenderer } from "./XRComponentRenderer";
 import { textureCache } from "../utils/textureCache";
+import { DEFAULT_TOUR_ID, type TourId } from "../types/tours";
+import { formatRoomLabel } from "../utils/tourFormatting";
 import "./PanoramaViewer.css";
 
 interface PanoramaViewerProps {
@@ -23,10 +26,13 @@ interface PanoramaViewerProps {
   navigationHotspots: unknown[];
   onNavigate: (pano: ParsedPano) => void;
   allPanos?: ParsedPano[];
+  tourId?: TourId;
   isEditMode?: boolean;
+  editModeType?: "component" | "navigation" | "delete-navigation";
   onCoordinateClick?: (coords: [number, number, number]) => void;
   onEditComponent?: (component: RoomComponent) => void;
   onDeleteComponent?: (componentId: string) => void;
+  onDeleteNavigationMarker?: (markerId: string) => void;
 }
 
 /**
@@ -35,8 +41,16 @@ interface PanoramaViewerProps {
 const NavigationMarker: React.FC<{
   position: [number, number, number];
   destinationRoom: string;
+  isDeleteMode?: boolean;
+  isDynamic?: boolean;
   onClick: () => void;
-}> = ({ position, destinationRoom, onClick }) => {
+}> = ({
+  position,
+  destinationRoom,
+  isDeleteMode = false,
+  isDynamic = false,
+  onClick,
+}) => {
   const groupRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
@@ -67,15 +81,25 @@ const NavigationMarker: React.FC<{
     }
   });
 
-  const accentColor = isHovered ? 0x00ffee : 0x00d9ff;
+  const accentColor = isDeleteMode
+    ? isHovered
+      ? 0xff8b8b
+      : 0xff6b6b
+    : isHovered
+      ? 0x00ffee
+      : 0x00d9ff;
+  const canInteract = !isDeleteMode || isDynamic;
 
   return (
     <group ref={groupRef} position={position}>
       {/* Outer spinning ring */}
       <mesh
         ref={ringRef}
-        onClick={onClick}
+        onClick={canInteract ? onClick : undefined}
         onPointerEnter={() => {
+          if (!canInteract) {
+            return;
+          }
           setIsHovered(true);
           document.body.style.cursor = "pointer";
         }}
@@ -96,8 +120,11 @@ const NavigationMarker: React.FC<{
 
       {/* Solid core — clickable */}
       <mesh
-        onClick={onClick}
+        onClick={canInteract ? onClick : undefined}
         onPointerEnter={() => {
+          if (!canInteract) {
+            return;
+          }
           setIsHovered(true);
           document.body.style.cursor = "pointer";
         }}
@@ -116,23 +143,48 @@ const NavigationMarker: React.FC<{
           className="nav-marker-card"
           style={{
             borderColor: isHovered
-              ? "rgba(0,255,238,0.75)"
-              : "rgba(0,217,255,0.35)",
+              ? isDeleteMode
+                ? "rgba(255,107,107,0.78)"
+                : "rgba(0,255,238,0.75)"
+              : isDeleteMode
+                ? "rgba(255,107,107,0.35)"
+                : "rgba(0,217,255,0.35)",
             boxShadow: isHovered
-              ? "0 0 28px rgba(0,255,238,0.55), 0 8px 32px rgba(0,0,0,0.7)"
-              : "0 0 16px rgba(0,217,255,0.3), 0 6px 24px rgba(0,0,0,0.65)",
+              ? isDeleteMode
+                ? "0 0 28px rgba(255,107,107,0.45), 0 8px 32px rgba(0,0,0,0.7)"
+                : "0 0 28px rgba(0,255,238,0.55), 0 8px 32px rgba(0,0,0,0.7)"
+              : isDeleteMode
+                ? "0 0 16px rgba(255,107,107,0.22), 0 6px 24px rgba(0,0,0,0.65)"
+                : "0 0 16px rgba(0,217,255,0.3), 0 6px 24px rgba(0,0,0,0.65)",
+            opacity: isDeleteMode && !isDynamic ? 0.45 : 1,
           }}
-          onClick={onClick}
+          onClick={canInteract ? onClick : undefined}
         >
           <span
             className="nav-marker-icon"
-            style={{ color: isHovered ? "#00ffee" : "#00d9ff" }}
+            style={{
+              color: isDeleteMode
+                ? isHovered
+                  ? "#ffd0d0"
+                  : "#ffb3b3"
+                : isHovered
+                  ? "#00ffee"
+                  : "#00d9ff",
+            }}
           >
-            <DoorOpen size={16} />
+            {isDeleteMode ? <Trash2 size={16} /> : <DoorOpen size={16} />}
           </span>
           <div className="nav-marker-text">
-            <span className="nav-marker-label">Go to</span>
-            <span className="nav-marker-room">{destinationRoom}</span>
+            <span className="nav-marker-label">
+              {isDeleteMode
+                ? isDynamic
+                  ? "Remove path"
+                  : "Built-in path"
+                : "Go to"}
+            </span>
+            <span className="nav-marker-room">
+              {formatRoomLabel(destinationRoom)}
+            </span>
           </div>
           <span
             className="nav-marker-arrow"
@@ -150,23 +202,26 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
   pano,
   onNavigate,
   allPanos = [],
+  tourId = DEFAULT_TOUR_ID,
   isEditMode = false,
+  editModeType = "component",
   onCoordinateClick,
   onEditComponent,
   onDeleteComponent,
+  onDeleteNavigationMarker,
 }) => {
   const sphereRef = useRef<THREE.Mesh>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
 
   // Load room components when pano changes - use useMemo to avoid effect warnings
   const roomComponents = useMemo(() => {
-    return getComponentsForRoom(pano.label);
-  }, [pano.label]);
+    return getComponentsForRoom(pano.label, tourId);
+  }, [pano.label, tourId]);
 
   // Load navigation markers for current room
   const navMarkers = useMemo(() => {
-    return getMarkersForRoom(pano.label);
-  }, [pano.label]);
+    return getMarkersForRoom(pano.label, tourId);
+  }, [pano.label, tourId]);
 
   const [hoveredCoords, setHoveredCoords] = useState<
     [number, number, number] | null
@@ -197,7 +252,11 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
       ctx.fillStyle = "white";
       ctx.font = "bold 48px Arial";
       ctx.textAlign = "center";
-      ctx.fillText(pano.label, canvas.width / 2, canvas.height / 2 - 30);
+      ctx.fillText(
+        formatRoomLabel(pano.label),
+        canvas.width / 2,
+        canvas.height / 2 - 30,
+      );
       ctx.font = "32px Arial";
       ctx.fillStyle = "#bdc3c7";
       ctx.fillText(
@@ -265,11 +324,17 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
   // Edit mode: Handle click to capture coordinates (requires Shift key)
   const handleCanvasClick = useCallback(
     (event: MouseEvent) => {
-      if (isEditMode && hoveredCoords && onCoordinateClick && event.shiftKey) {
+      if (
+        isEditMode &&
+        editModeType !== "delete-navigation" &&
+        hoveredCoords &&
+        onCoordinateClick &&
+        event.shiftKey
+      ) {
         onCoordinateClick(hoveredCoords);
       }
     },
-    [isEditMode, hoveredCoords, onCoordinateClick],
+    [editModeType, isEditMode, hoveredCoords, onCoordinateClick],
   );
 
   // Track mouse when in edit mode
@@ -328,31 +393,75 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
   );
 
   // Get navigation destinations for current room (hardcoded + dynamic)
-  const hardcodedDestinations = getRoomDestinations(pano.label);
+  const hardcodedDestinations = getRoomDestinations(pano.label, tourId);
 
   // Combine hardcoded markers with dynamic markers from localStorage
   const allDestinations = useMemo(() => {
-    const dynamicMarkers = navMarkers.map((marker) => ({
-      room: marker.toRoom,
-      coords: marker.position,
-    }));
+    const destinationMap = new Map<
+      string,
+      {
+        room: string;
+        coords: [number, number, number];
+        isDynamic: boolean;
+        markerId?: string;
+      }
+    >();
 
-    return [...hardcodedDestinations, ...dynamicMarkers];
+    hardcodedDestinations.forEach((destination) => {
+      const key = `${destination.room}:${destination.coords.join(",")}`;
+      destinationMap.set(key, {
+        room: destination.room,
+        coords: destination.coords,
+        isDynamic: false,
+      });
+    });
+
+    navMarkers.forEach((marker: NavigationMarker) => {
+      const key = `${marker.toRoom}:${marker.position.join(",")}`;
+      if (!destinationMap.has(key)) {
+        destinationMap.set(key, {
+          room: marker.toRoom,
+          coords: marker.position,
+          isDynamic: true,
+          markerId: marker.id,
+        });
+      }
+    });
+
+    return Array.from(destinationMap.values());
   }, [hardcodedDestinations, navMarkers]);
 
   // Handle marker navigation
   const handleMarkerClick = useCallback(
-    (destinationRoom: string) => {
-      // Find pano with matching room label
-      const targetPano = allPanos.find(
-        (p) =>
-          p.label.toLowerCase().trim() === destinationRoom.toLowerCase().trim(),
+    (destinationRoom: string, markerId?: string, isDynamic?: boolean) => {
+      if (editModeType === "delete-navigation") {
+        if (isDynamic && markerId && onDeleteNavigationMarker) {
+          onDeleteNavigationMarker(markerId);
+        }
+        return;
+      }
+
+      const matchingPanos = allPanos.filter(
+        (candidate) =>
+          candidate.label.toLowerCase().trim() ===
+          destinationRoom.toLowerCase().trim(),
       );
+      const targetPano =
+        matchingPanos.find(
+          (candidate) => candidate.floorNumber === pano.floorNumber,
+        ) || matchingPanos[0];
+
       if (targetPano) {
         onNavigate(targetPano);
       }
     },
-    [allPanos, onNavigate],
+    [
+      allPanos,
+      editModeType,
+      onDeleteNavigationMarker,
+      onNavigate,
+      pano.floorNumber,
+    ],
   );
 
   return (
@@ -372,10 +481,18 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
 
         return (
           <NavigationMarker
-            key={`${destination.room}-${index}`}
+            key={`${destination.room}-${destination.markerId ?? index}`}
             position={markerPos}
             destinationRoom={destination.room}
-            onClick={() => handleMarkerClick(destination.room)}
+            isDeleteMode={editModeType === "delete-navigation"}
+            isDynamic={destination.isDynamic}
+            onClick={() =>
+              handleMarkerClick(
+                destination.room,
+                destination.markerId,
+                destination.isDynamic,
+              )
+            }
           />
         );
       })}
@@ -416,44 +533,59 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
       />
 
       {/* Edit Mode: Coordinate display */}
-      {isEditMode && hoveredCoords && (
-        <Html
-          position={[0, 0, -50]}
-          scale={1}
-          style={{
-            pointerEvents: "none",
-            userSelect: "none",
-          }}
-        >
-          <div className="edit-help-shell">
-            <div className={`edit-help-panel ${isShiftPressed ? "ready" : ""}`}>
-              <div className="edit-help-header">
-                <span className="edit-help-icon">
-                  <MousePointerClick size={18} />
-                </span>
-                <div className="edit-help-title-group">
-                  <span className="edit-help-label">Edit Mode</span>
-                  <span className="edit-help-title">
-                    {isShiftPressed
-                      ? "Ready to place component"
-                      : "Hold SHIFT + click to place"}
+      {isEditMode &&
+        (hoveredCoords || editModeType === "delete-navigation") && (
+          <Html
+            position={[0, 0, -50]}
+            scale={1}
+            style={{
+              pointerEvents: "none",
+              userSelect: "none",
+            }}
+          >
+            <div className="edit-help-shell">
+              <div
+                className={`edit-help-panel ${isShiftPressed ? "ready" : ""}`}
+              >
+                <div className="edit-help-header">
+                  <span className="edit-help-icon">
+                    <MousePointerClick size={18} />
                   </span>
+                  <div className="edit-help-title-group">
+                    <span className="edit-help-label">Edit Mode</span>
+                    <span className="edit-help-title">
+                      {editModeType === "delete-navigation"
+                        ? "Delete added navigation"
+                        : editModeType === "navigation"
+                          ? isShiftPressed
+                            ? "Ready to place navigation"
+                            : "Hold SHIFT + click to place"
+                          : isShiftPressed
+                            ? "Ready to place component"
+                            : "Hold SHIFT + click to place"}
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              <div className="edit-help-body">
-                {isShiftPressed
-                  ? "Click anywhere on the panorama to drop a component or navigation marker at the highlighted position."
-                  : "Move your cursor over the panorama to preview coordinates, then hold SHIFT and click to place."}
-              </div>
+                <div className="edit-help-body">
+                  {editModeType === "delete-navigation"
+                    ? "Click a user-added navigation marker to remove it. Built-in hardcoded paths stay locked. Press ESC to return to view mode."
+                    : editModeType === "navigation"
+                      ? isShiftPressed
+                        ? "Click anywhere on the panorama to drop a navigation marker at the highlighted position."
+                        : "Move your cursor over the panorama to preview coordinates, then hold SHIFT and click to add a navigation marker. Press ESC to return to view mode."
+                      : isShiftPressed
+                        ? "Click anywhere on the panorama to drop a component at the highlighted position."
+                        : "Move your cursor over the panorama to preview coordinates, then hold SHIFT and click to place a component. Press ESC to return to view mode."}
+                </div>
 
-              {/* <div className="edit-help-coords">
+                {/* <div className="edit-help-coords">
                 [{hoveredCoords[0]}, {hoveredCoords[1]}, {hoveredCoords[2]}]
               </div> */}
+              </div>
             </div>
-          </div>
-        </Html>
-      )}
+          </Html>
+        )}
 
       {/* Coordinate display - OLD (commented out) */}
       {/* 

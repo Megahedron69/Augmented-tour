@@ -54,6 +54,9 @@ class TextureCache {
           const texture = new THREE.Texture(img);
           texture.mapping = THREE.EquirectangularReflectionMapping;
           texture.colorSpace = THREE.SRGBColorSpace;
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.repeat.x = -1;
+          texture.offset.x = 1;
           texture.needsUpdate = true;
           resolve(texture);
         } catch (error) {

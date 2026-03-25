@@ -7,6 +7,7 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DoorOpen, X, CheckCircle2, AlertCircle } from "lucide-react";
 import type { NavigationMarker } from "../types/navigationMarkers";
+import { formatRoomLabel } from "../utils/tourFormatting";
 import "../components/ComponentEditor.css"; // Reuse the glassmorphism styles
 
 interface NavigationMarkerEditorProps {
@@ -94,7 +95,7 @@ export const NavigationMarkerEditor: React.FC<NavigationMarkerEditorProps> = ({
                 <label className="form-label">From Room</label>
                 <motion.input
                   type="text"
-                  value={fromRoom}
+                  value={formatRoomLabel(fromRoom)}
                   disabled
                   className="form-input disabled-input"
                   layoutId="fromRoom"
@@ -129,7 +130,7 @@ export const NavigationMarkerEditor: React.FC<NavigationMarkerEditorProps> = ({
                     .filter((room) => room !== fromRoom)
                     .map((room) => (
                       <option key={room} value={room}>
-                        {room}
+                        {formatRoomLabel(room)}
                       </option>
                     ))}
                 </motion.select>

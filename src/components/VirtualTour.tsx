@@ -8,8 +8,10 @@ import {
   RotateCcw,
   Package,
   DoorOpen,
+  House,
   Map,
   MapPin,
+  Trash2,
   X,
 } from "lucide-react";
 import "./VirtualTour.css";
@@ -24,19 +26,38 @@ import {
   groupPanosByRoom,
   preloadPanoramaImages,
 } from "../utils/zindDataParser";
-import { MANUAL_PANOS } from "../constants/manualPanos";
+import { getTourConfig } from "../constants/tourConfigs";
 import { textureCache } from "../utils/textureCache";
 import type { ParsedPano, RoomGroup } from "../utils/zindDataParser";
 import type { RoomComponent } from "../types/roomComponents";
 import {
   addComponent,
+  clearAllComponents,
   updateComponent,
   deleteComponent,
 } from "../utils/componentStorage";
 import type { NavigationMarker } from "../types/navigationMarkers";
-import { addNavigationMarker } from "../utils/navigationMarkerStorage";
+import {
+  addNavigationMarker,
+  deleteNavigationMarker,
+} from "../utils/navigationMarkerStorage";
+import { DEFAULT_TOUR_ID, type TourId } from "../types/tours";
+import {
+  formatFloorLabel,
+  formatRoomLabel,
+  normalizeRoomLabel,
+} from "../utils/tourFormatting";
 
-const VirtualTour: React.FC = () => {
+interface VirtualTourProps {
+  onGoHome?: () => void;
+  tourId?: TourId;
+}
+
+const VirtualTour: React.FC<VirtualTourProps> = ({
+  onGoHome,
+  tourId = DEFAULT_TOUR_ID,
+}) => {
+  const tourConfig = useMemo(() => getTourConfig(tourId), [tourId]);
   const [allPanos, setAllPanos] = useState<ParsedPano[]>([]);
   const [roomGroups, setRoomGroups] = useState<RoomGroup[]>([]);
   const [currentPano, setCurrentPano] = useState<ParsedPano | null>(null);
@@ -49,9 +70,9 @@ const VirtualTour: React.FC = () => {
 
   // XR Edit Mode State
   const [isEditMode, setIsEditMode] = useState(false);
-  const [editModeType, setEditModeType] = useState<"component" | "navigation">(
-    "component",
-  );
+  const [editModeType, setEditModeType] = useState<
+    "component" | "navigation" | "delete-navigation"
+  >("component");
   const [showComponentEditor, setShowComponentEditor] = useState(false);
   const [showNavMarkerEditor, setShowNavMarkerEditor] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<
@@ -76,8 +97,13 @@ const VirtualTour: React.FC = () => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const data = await loadZindData();
-        const panos = [...parseZindData(data), ...MANUAL_PANOS].sort((a, b) => {
+        setError(null);
+
+        const basePanos = tourConfig.usesZindData
+          ? parseZindData(await loadZindData())
+          : [];
+
+        const panos = [...basePanos, ...tourConfig.manualPanos].sort((a, b) => {
           if (a.floorNumber !== b.floorNumber) {
             return a.floorNumber - b.floorNumber;
           }
@@ -92,12 +118,12 @@ const VirtualTour: React.FC = () => {
         setAllPanos(panos);
         setRoomGroups(rooms);
 
-        // Start with living room (or first room if living room not found)
-        const livingRoom = rooms.find(
-          (r) => r.label.toLowerCase() === "living room",
+        const preferredRoom = rooms.find(
+          (room) =>
+            room.label === normalizeRoomLabel(tourConfig.startRoomLabel),
         );
         const startPano =
-          livingRoom?.primaryPano || rooms[0]?.primaryPano || panos[0];
+          preferredRoom?.primaryPano || rooms[0]?.primaryPano || panos[0];
         setCurrentPano(startPano);
 
         // Preload all panorama images to prevent white flashes
@@ -123,25 +149,36 @@ const VirtualTour: React.FC = () => {
     };
 
     loadData();
-  }, []);
+  }, [tourConfig]);
 
   const handlePanoChange = (pano: ParsedPano) => {
     setCurrentPano(pano);
   };
 
-  const handleRoomChange = (roomLabel: string) => {
+  const handleRoomChange = (roomLabel: string, preferredFloor?: number) => {
     const room = roomGroups.find((r) => r.label === roomLabel);
-    if (room && room.primaryPano) {
-      setCurrentPano(room.primaryPano);
+    if (!room) {
+      return;
+    }
+
+    const matchingFloorPano =
+      preferredFloor === undefined
+        ? room.panoramas.find(
+            (pano) => pano.floorNumber === currentPano?.floorNumber,
+          )
+        : room.panoramas.find((pano) => pano.floorNumber === preferredFloor);
+
+    const nextPano = matchingFloorPano || room.primaryPano || room.panoramas[0];
+
+    if (nextPano) {
+      setCurrentPano(nextPano);
     }
   };
 
   const availableFloors = useMemo(() => {
     const floors = new Set<number>();
     roomGroups.forEach((room) => {
-      if (room.primaryPano) {
-        floors.add(room.primaryPano.floorNumber);
-      }
+      room.panoramas.forEach((pano) => floors.add(pano.floorNumber));
     });
     return [...floors].sort((a, b) => a - b);
   }, [roomGroups]);
@@ -151,13 +188,39 @@ const VirtualTour: React.FC = () => {
       return roomGroups;
     }
 
-    return roomGroups.filter(
-      (room) => room.primaryPano?.floorNumber === selectedRoomFloor,
+    return roomGroups.filter((room) =>
+      room.panoramas.some((pano) => pano.floorNumber === selectedRoomFloor),
     );
   }, [roomGroups, selectedRoomFloor]);
 
+  useEffect(() => {
+    if (!isEditMode) {
+      return;
+    }
+
+    const handleEscapeToView = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      setIsEditMode(false);
+      setEditModeType("component");
+      setShowComponentEditor(false);
+      setShowNavMarkerEditor(false);
+      setSelectedPosition(null);
+      setEditingComponent(null);
+    };
+
+    window.addEventListener("keydown", handleEscapeToView);
+    return () => window.removeEventListener("keydown", handleEscapeToView);
+  }, [isEditMode]);
+
   // Handle coordinate click in edit mode
   const handleCoordinateClick = (coords: [number, number, number]) => {
+    if (editModeType === "delete-navigation") {
+      return;
+    }
+
     setSelectedPosition(coords);
 
     if (editModeType === "component") {
@@ -173,7 +236,7 @@ const VirtualTour: React.FC = () => {
   ) => {
     if (editingComponent) {
       // Update existing component
-      updateComponent(editingComponent.id, componentData);
+      updateComponent(editingComponent.id, componentData, tourId);
       setEditingComponent(null);
     } else {
       // Add new component
@@ -182,7 +245,7 @@ const VirtualTour: React.FC = () => {
         id: crypto.randomUUID(),
         createdAt: Date.now(),
       };
-      addComponent(newComponent);
+      addComponent(newComponent, tourId);
     }
 
     setComponentRefresh((prev) => prev + 1); // Trigger re-render in PanoramaViewer
@@ -200,7 +263,7 @@ const VirtualTour: React.FC = () => {
   // Delete component
   const handleDeleteComponent = (componentId: string) => {
     if (window.confirm("Delete this component?")) {
-      deleteComponent(componentId);
+      deleteComponent(componentId, tourId);
       setComponentRefresh((prev) => prev + 1);
     }
   };
@@ -215,10 +278,17 @@ const VirtualTour: React.FC = () => {
       createdAt: Date.now(),
     };
 
-    addNavigationMarker(newMarker);
+    addNavigationMarker(newMarker, tourId);
     setNavMarkerRefresh((prev) => prev + 1); // Trigger re-render in PanoramaViewer
     setShowNavMarkerEditor(false);
     setSelectedPosition(null);
+  };
+
+  const handleDeleteNavMarker = (markerId: string) => {
+    if (window.confirm("Delete this navigation marker?")) {
+      deleteNavigationMarker(markerId, tourId);
+      setNavMarkerRefresh((prev) => prev + 1);
+    }
   };
 
   // Reset XR components (clear localStorage for XR components only, NOT navigation markers)
@@ -228,10 +298,8 @@ const VirtualTour: React.FC = () => {
         "Clear all XR components from this world? (Navigation markers will be preserved)",
       )
     ) {
-      import("../utils/componentStorage").then(({ clearAllComponents }) => {
-        clearAllComponents();
-        setComponentRefresh((prev) => prev + 1);
-      });
+      clearAllComponents(tourId);
+      setComponentRefresh((prev) => prev + 1);
     }
   };
 
@@ -273,10 +341,13 @@ const VirtualTour: React.FC = () => {
               navigationHotspots={[]}
               onNavigate={handlePanoChange}
               allPanos={allPanos}
+              tourId={tourId}
               isEditMode={isEditMode}
+              editModeType={editModeType}
               onCoordinateClick={handleCoordinateClick}
               onEditComponent={handleEditComponent}
               onDeleteComponent={handleDeleteComponent}
+              onDeleteNavigationMarker={handleDeleteNavMarker}
               key={`${currentPano.id}-${componentRefresh}-${navMarkerRefresh}`}
             />
           </Suspense>
@@ -358,6 +429,16 @@ const VirtualTour: React.FC = () => {
             <DoorOpen size={16} />
             Navigation
           </motion.button>
+          <motion.button
+            className={`mode-btn danger ${editModeType === "delete-navigation" ? "active" : ""}`}
+            onClick={() => setEditModeType("delete-navigation")}
+            title="Remove added navigation markers"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <Trash2 size={16} />
+            Delete Path
+          </motion.button>
         </motion.div>
       )}
 
@@ -369,22 +450,33 @@ const VirtualTour: React.FC = () => {
         transition={{ delay: 0.2, type: "spring", damping: 20, stiffness: 300 }}
       >
         <div className="info-panel-header">
-          <h3>
-            {currentPano.label.charAt(0).toUpperCase() +
-              currentPano.label.slice(1)}
-          </h3>
-          <motion.button
-            className="room-selector-btn"
-            onClick={() => setShowRoomSelector(!showRoomSelector)}
-            title="Select Room"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <MapPin size={18} />
-          </motion.button>
+          <h3>{formatRoomLabel(currentPano.label)}</h3>
+          <div className="info-panel-actions">
+            {onGoHome && (
+              <motion.button
+                className="home-btn"
+                onClick={onGoHome}
+                title="Back to Home"
+                aria-label="Back to Home"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <House size={16} />
+              </motion.button>
+            )}
+            <motion.button
+              className="room-selector-btn"
+              onClick={() => setShowRoomSelector(!showRoomSelector)}
+              title="Select Room"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <MapPin size={18} />
+            </motion.button>
+          </div>
         </div>
         <p className="pano-info">
-          Floor {currentPano.floorNumber} • Camera Height:{" "}
+          {formatFloorLabel(currentPano.floorNumber)} • Camera Height:{" "}
           {currentPano.cameraHeight.toFixed(2)}m
         </p>
         <div className="stats">
@@ -454,7 +546,7 @@ const VirtualTour: React.FC = () => {
                       onClick={() => setSelectedRoomFloor(floor)}
                       type="button"
                     >
-                      Floor {floor}
+                      {formatFloorLabel(floor)}
                     </button>
                   ))}
                 </div>
@@ -464,7 +556,12 @@ const VirtualTour: React.FC = () => {
                       key={room.label}
                       className={`room-card ${room.label === currentPano.label ? "active" : ""}`}
                       onClick={() => {
-                        handleRoomChange(room.label);
+                        handleRoomChange(
+                          room.label,
+                          selectedRoomFloor === "all"
+                            ? undefined
+                            : selectedRoomFloor,
+                        );
                         setShowRoomSelector(false);
                       }}
                       initial={{ opacity: 0, y: 10 }}
@@ -475,11 +572,16 @@ const VirtualTour: React.FC = () => {
                       whileTap={{ scale: 0.98 }}
                     >
                       <div className="room-name">
-                        {room.label.charAt(0).toUpperCase() +
-                          room.label.slice(1)}
+                        {formatRoomLabel(room.label)}
                       </div>
                       <div className="room-stats">
-                        Floor {room.primaryPano?.floorNumber ?? "-"}
+                        {selectedRoomFloor !== "all"
+                          ? formatFloorLabel(selectedRoomFloor)
+                          : room.panoramas.length > 1
+                            ? "Multi-floor"
+                            : room.primaryPano
+                              ? formatFloorLabel(room.primaryPano.floorNumber)
+                              : "-"}
                       </div>
                     </motion.button>
                   ))}
@@ -537,6 +639,7 @@ const VirtualTour: React.FC = () => {
               currentRoom={currentPano?.label || ""}
               onRoomClick={handleRoomChange}
               onClose={() => setShowFloorPlan(false)}
+              tourId={tourId}
             />
           </motion.div>
         )}
